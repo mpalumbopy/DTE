@@ -117,15 +117,35 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 - **Decisiones registradas:** ADR-010 (advisory lock en auditoría).
 - **Pendiente:** ninguno para F3.
 
+## F4 — xml-engine (parcial: C14N, hash, XAdES-T)
+
+- **Fecha:** 2026-07-22
+- **Estado:** 🟡 parcial (ver ADR-011) — `builder`/`validator`/XSD provisional siguen bloqueados por el
+  XML de referencia
+- **Hecho:**
+  - `packages/xml-engine/src/hash`: SHA-256 hex/base64.
+  - `packages/xml-engine/src/c14n`: canonicalización C14N exclusiva (vía `xmldsigjs`).
+  - `packages/xml-engine/src/xades`: `firmarNodoXadesBes` + `completarConSelloTiempo` (XAdES-T real:
+    SignedProperties, SigningTime, referencias múltiples incluyendo encadenamiento a otro nodo por Id —
+    I7 —, y `xades:SignatureTimeStamp` embebido) + `validarFirmaXades`, sobre el WebCrypto nativo de
+    Node 20 (sin dependencias de `@peculiar/webcrypto`).
+  - Tests reales (no mocks): firma válida, detección de alteración del contenido firmado, detección de
+    alteración de un nodo referenciado (I7), presencia del sello de tiempo embebido, determinismo de
+    C14N+hash. 8/8 verde, 92 % cobertura.
+- **Pendiente:** `builder/` (genera el XML del perfil desde objetos de dominio), `validator/` (XSD +
+  semántica) y `schema/pagare-dte.provisional.xsd` (ingeniería inversa del XML de referencia) — bloqueados
+  hasta recibir el XML correcto del pagaré.
+- **Decisiones registradas:** ADR-011.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
 - XML firmado de referencia del pagaré: **pendiente**. Un primer intento de subida (2026-07-22) resultó
   ser un archivo no relacionado (un "Diploma Digital" del MEC de Brasil, namespace
   `http://portal.mec.gov.br/diplomadigital/arquivos-em-xsd`) — se avisó al usuario y se descartó sin
-  usarlo. F4 (xml-engine) sigue bloqueada hasta recibir el XML correcto.
+  usarlo. El resto de F4 (builder/validator/XSD) sigue bloqueado hasta recibir el XML correcto.
 
 ## Próximos pasos
 
-- F4 (xml-engine): pendiente de recibir el XML de referencia firmado del pagaré.
-- F5 (crypto-providers/simulador): no depende de insumos externos, puede adelantarse mientras se espera.
+- F4 (xml-engine): builder/validator/XSD pendientes de recibir el XML de referencia firmado del pagaré.
+- F5 (crypto-providers/simulador): no depende de insumos externos, en curso.

@@ -174,3 +174,31 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
 - **Nota:** este mismo patrón (bloquear un recurso que puede no tener filas) habrá que tenerlo en cuenta si
   alguna función futura necesita "encadenar" sobre una tabla que empieza vacía sin pasar por
   `fn_aplicar_evento` (que sí es seguro porque siempre bloquea la fila de `dte`, que ya existe).
+
+## ADR-011 — F4 (xml-engine) ejecutada parcialmente mientras se espera el XML de referencia
+
+- **Fecha:** 2026-07-22
+- **Fase:** F4
+- **Contexto:** F4 sigue bloqueada por el XML de referencia firmado (ver ADR-001 y su actualización).
+  Pero no todo F4 depende de ese archivo: C14N exclusivo, hash SHA-256 y la construcción/validación de
+  firmas XAdES-T son estándares W3C/ETSI genéricos que no dependen del perfil específico del pagaré — solo
+  el `builder` (genera el XML del perfil desde objetos de dominio), el `validator` semántico y
+  `schema/pagare-dte.provisional.xsd` (construido por ingeniería inversa del XML) sí lo necesitan.
+- **Decisión:** se construyen ahora `packages/xml-engine/src/{c14n,hash,xades}` (con tests reales, 92 %
+  de cobertura), porque F5 (crypto-providers/simulador) los necesita para el `FirmaSimulador` y
+  `TsaSimulador`. `builder/`, `validator/` y `schema/pagare-dte.provisional.xsd` quedan pendientes hasta
+  recibir el XML correcto; F4 se cierra formalmente recién entonces.
+- **Detalle técnico — XAdES-T con `xadesjs`:** la librería (`xadesjs`) documenta que solo XAdES-BES está
+  "totalmente soportado"; no tiene un helper de alto nivel para adjuntar el
+  `xades:UnsignedSignatureProperties/xades:SignatureTimeStamp` que define XAdES-T. Se implementó a mano
+  pero usando la propia API tipada de la librería (no manipulación de DOM cruda): tras firmar (XAdES-BES,
+  obteniendo `ds:SignatureValue`), se sella ese valor con la TSA, se agrega un
+  `xades:EncapsulatedTimeStamp` a `signedXml.UnsignedProperties.UnsignedSignatureProperties`, y **recién
+  ahí** se llama una única vez a `signature.GetXml()` para fijar el XML final (una segunda llamada
+  posterior no vuelve a insertarlo). Verificado con tests: la firma sigue validando con el sello embebido,
+  y la alteración de cualquier nodo referenciado (incluida una referencia a un evento anterior, para el
+  encadenamiento de I7) hace fallar la verificación.
+- **`node-forge` en `xml-engine`:** se agregó como devDependency **solo para tests**
+  (`xades/test-cert.ts`, excluido del build vía `tsconfig.json`), porque `xadesjs` valida el DER del
+  certificado embebido (`pkijs`) y un buffer arbitrario no sirve. La generación real de certificados para
+  el simulador (CA efímera) vive en `packages/crypto-providers`, no acá.
