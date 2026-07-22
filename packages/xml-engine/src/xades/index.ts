@@ -25,6 +25,13 @@ export interface OpcionesFirmarXades {
   referenciasAdicionales?: ReferenciaAdicional[];
   fechaFirma?: Date;
   signatureId?: string;
+  /**
+   * URI de la referencia principal (enveloped). Por defecto `''` (todo el documento) — el caso de
+   * uso original de F4/F5. El perfil pagaré-DTE necesita firmas anidadas dentro de un nodo
+   * específico (`gDatosGeneralesDTE`, cada `gEvento`), no en la raíz del documento: para eso se pasa
+   * el id de ese nodo (p. ej. `'#dDTE...'`), junto con `nodoDestino` en `completarConSelloTiempo`.
+   */
+  uriNodoPrincipal?: string;
 }
 
 export interface FirmaBesPendiente {
@@ -51,7 +58,7 @@ export async function firmarNodoXadesBes(
 
   const signedXml = new SignedXml();
   const referencias = [
-    { hash: 'SHA-256', transforms: ['enveloped', 'c14n'] },
+    { uri: opciones.uriNodoPrincipal ?? '', hash: 'SHA-256', transforms: ['enveloped', 'c14n'] },
     ...(opciones.referenciasAdicionales ?? []).map((r) => ({
       uri: r.uri,
       hash: 'SHA-256',
@@ -83,11 +90,17 @@ export async function firmarNodoXadesBes(
  * Embebe el token TSA (DER, RFC 3161) como xades:SignatureTimeStamp dentro de
  * UnsignedProperties, finaliza el XML de la firma (XAdES-T) y lo adjunta al documento.
  * Debe llamarse una sola vez por firma, después de `firmarNodoXadesBes`.
+ *
+ * `nodoDestino` es el elemento donde se inserta el `ds:Signature` (por defecto la raíz del
+ * documento). Para el perfil pagaré-DTE, donde varias firmas se apilan dentro de un mismo nodo
+ * (`gDatosGeneralesDTE`, cada `gEvento`), debe ser ese nodo — no la raíz — y coincidir con el id
+ * pasado como `uriNodoPrincipal` en `firmarNodoXadesBes`.
  */
 export function completarConSelloTiempo(
   documento: Document,
   firmaPendiente: FirmaBesPendiente,
   tokenTsaDer: Buffer,
+  nodoDestino?: Element,
 ): Element {
   const marcaTiempo = new xadesXml.xml.SignatureTimeStamp();
   const encapsulado = new xadesXml.xml.EncapsulatedTimeStamp();
@@ -99,7 +112,7 @@ export function completarConSelloTiempo(
   if (!elementoFinal) {
     throw new Error('xadesjs no devolvió el elemento de firma al finalizar');
   }
-  documento.documentElement.appendChild(elementoFinal);
+  (nodoDestino ?? documento.documentElement).appendChild(elementoFinal);
   return elementoFinal;
 }
 

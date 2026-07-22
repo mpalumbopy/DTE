@@ -1,0 +1,380 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  XSD PROVISIONAL del perfil pagaré-DTE (Paraguay, Ley 6822/2021), construido por ingeniería
+  inversa del XML de referencia firmado (packages/xml-engine/test/fixtures/pagare-referencia-firmado.xml)
+  — ver docs/PLAN.md sección 7 y el ADR correspondiente en docs/DECISIONES.md.
+
+  Reemplazable por el XSD oficial sin tocar código: ver XSD_PATH en la configuración de apps/api.
+
+  PUNTOS A CONFIRMAR CON EL XSD OFICIAL (documentados aquí, no adivinados en el código):
+  - Persona jurídica (codigoTipoPersona=2) no está demostrada en el XML de referencia (solo
+    "Fisica" aparece); este XSD no define esa variante todavía.
+  - Asimetría real observada en los sufijos de "país": codigoPaisEmision/dPaisEmisionDTE,
+    codigoPaisAcreedor/dPaisAcreedor NO llevan "DTE" en el código de país pero SÍ en los demás
+    campos del mismo bloque; codigoPaisPagoDTE si lo lleva. Se preserva tal cual (I8: el XML manda).
+  - gEvento de tipo BLOQUEO (codigoTipoEvento=2) no está demostrado en el XML de referencia — no
+    se modela aún (ver docs/PLAN.md F7).
+  - El orden interno de campos de <gEvento> difiere entre ENDOSO (tipoEvento después de
+    numeroEndoso) y PAGO (tipoEvento antes de numeroPago) — se preserva cada orden tal como se
+    observó, no se unifica.
+  - La firma final (`ds:Signature` con URI="", fuera de `</DTE>`) no está definida aquí: las firmas
+    se validan por xades/validator, no por este XSD (el elemento `ds:Signature` se declara
+    `xs:any` para no restringir su contenido).
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+           targetNamespace="http://acraiz.gov.py/pagare/arhivos-en-xsd"
+           xmlns="http://acraiz.gov.py/pagare/arhivos-en-xsd"
+           elementFormDefault="qualified">
+
+  <!--
+    Sin xs:import al XSD oficial de xmldsig-core (evitar una dependencia de red en tiempo de
+    validación — "sin acceso a internet garantizado en runtime", docs/PLAN.md sección 0.2). Las
+    firmas se validan criptográfica y estructuralmente en xades/validator, no aquí: dondequiera que
+    el XML real inserte un ds:Signature se acepta vía `<xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip"/>`,
+    sin tipar su contenido interno.
+  -->
+
+  <xs:complexType name="tDireccionEmision">
+    <xs:sequence>
+      <xs:element name="direccionEmisionDTE" type="xs:string"/>
+      <xs:element name="numeroCasaEmisionDTE" type="xs:string" minOccurs="0"/>
+      <xs:element name="codigoCiudadEmisionDTE" type="xs:integer"/>
+      <xs:element name="ciudadEmisionDTE" type="xs:string"/>
+      <xs:element name="codigoDistritoEmisionDTE" type="xs:integer"/>
+      <xs:element name="distritoEmisionDTE" type="xs:string"/>
+      <xs:element name="codigoDepartamentoEmisionDTE" type="xs:integer"/>
+      <xs:element name="departamentoEmisionDTE" type="xs:string"/>
+      <xs:element name="codigoPaisEmision" type="xs:integer"/>
+      <xs:element name="dPaisEmisionDTE" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tDireccionPago">
+    <xs:sequence>
+      <xs:element name="direccionPagoDTE" type="xs:string"/>
+      <xs:element name="numeroCasaPagoDTE" type="xs:string" minOccurs="0"/>
+      <xs:element name="codigoCiudadPagoDTE" type="xs:integer"/>
+      <xs:element name="ciudadPagoDTE" type="xs:string"/>
+      <xs:element name="codigoDistritoPagoDTE" type="xs:integer"/>
+      <xs:element name="distritoPagoDTE" type="xs:string"/>
+      <xs:element name="codigoDepartamentoPagoDTE" type="xs:integer"/>
+      <xs:element name="departamentoPagoDTE" type="xs:string"/>
+      <xs:element name="codigoPaisPagoDTE" type="xs:integer"/>
+      <xs:element name="dPaisPagoDTE" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tDireccionAcreedor">
+    <xs:sequence>
+      <xs:element name="direccionAcreedorDTE" type="xs:string"/>
+      <xs:element name="numeroCasaAcreedorDTE" type="xs:string" minOccurs="0"/>
+      <xs:element name="codigoCiudadAcreedorDTE" type="xs:integer"/>
+      <xs:element name="ciudadAcreedorDTE" type="xs:string"/>
+      <xs:element name="codigoDistritoAcreedorDTE" type="xs:integer"/>
+      <xs:element name="distritoAcreedorDTE" type="xs:string"/>
+      <xs:element name="codigoDepartamentoAcreedorDTE" type="xs:integer"/>
+      <xs:element name="departamentoAcreedorDTE" type="xs:string"/>
+      <xs:element name="codigoPaisAcreedor" type="xs:integer"/>
+      <xs:element name="dPaisAcreedor" type="xs:string"/>
+      <xs:element name="correoElectronicoAcreedor" type="xs:string" minOccurs="0"/>
+      <xs:element name="numeroContactoAcreedor" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tDocumentoAcreedorInicial">
+    <xs:sequence>
+      <xs:element name="cTipoDocumento" type="xs:integer"/>
+      <xs:element name="dTipoDocumento" type="xs:string"/>
+      <xs:element name="dNumero" type="xs:string"/>
+      <xs:element name="codigoPaisDocumento" type="xs:integer"/>
+      <xs:element name="nombrePaisDocumento" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tAcreedorInicial">
+    <xs:sequence>
+      <xs:element name="codigoTipoPersonaAcreedor" type="xs:integer"/>
+      <xs:element name="tipoPersonaAcreedor" type="xs:string"/>
+      <xs:element name="nombresApellidos" type="xs:string"/>
+      <xs:element name="gDocumentoAcreedorInicial" type="tDocumentoAcreedorInicial"/>
+      <xs:element name="gDireccionesAcreedor">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gDireccionAcreedor" type="tDireccionAcreedor" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tFirmanteDeudorPersonaFisica">
+    <xs:sequence>
+      <xs:element name="condicionFirmante" type="xs:string"/>
+      <xs:element name="codigoTipoPersonaDeudor" type="xs:integer"/>
+      <xs:element name="tipoPersonaDeudor" type="xs:string"/>
+      <xs:element name="cTipoDocumentoDeudor" type="xs:integer"/>
+      <xs:element name="dTipoDocumentoDeudor" type="xs:string"/>
+      <xs:element name="dNumeroDocumentoDeudor" type="xs:string"/>
+      <xs:element name="codigoPaisDocumentoDeudor" type="xs:integer"/>
+      <xs:element name="nombrePaisDocumentoDeudor" type="xs:string"/>
+      <xs:element name="nombresApellidosDeudor" type="xs:string"/>
+      <xs:element name="direccionDeudor" type="xs:string"/>
+      <xs:element name="numeroCasaDeudor" type="xs:string" minOccurs="0"/>
+      <xs:element name="codigoCiudadDeudor" type="xs:integer"/>
+      <xs:element name="ciudadDeudor" type="xs:string"/>
+      <xs:element name="codigoDistritoDeudor" type="xs:integer"/>
+      <xs:element name="distritoDeudor" type="xs:string"/>
+      <xs:element name="codigoDepartamentoDeudor" type="xs:integer"/>
+      <xs:element name="departamentoDeudor" type="xs:string"/>
+      <xs:element name="codigoPaisDeudor" type="xs:integer"/>
+      <xs:element name="dPaisDeudor" type="xs:string"/>
+      <xs:element name="correoElectronicoDeudor" type="xs:string" minOccurs="0"/>
+      <xs:element name="numeroContactoDeudor" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tFirmanteCoDeudorPersonaFisica">
+    <xs:sequence>
+      <xs:element name="condicionFirmante" type="xs:string"/>
+      <xs:element name="codigoTipoPersonaCoDeudor" type="xs:integer"/>
+      <xs:element name="tipoPersonaCoDeudor" type="xs:string"/>
+      <xs:element name="cTipoDocumentoCoDeudor" type="xs:integer"/>
+      <xs:element name="dTipoDocumentoCoDeudor" type="xs:string"/>
+      <xs:element name="dNumeroDocumentoCoDeudor" type="xs:string"/>
+      <xs:element name="codigoPaisDocumentoCoDeudor" type="xs:integer"/>
+      <xs:element name="nombrePaisDocumentoCoDeudor" type="xs:string"/>
+      <xs:element name="nombresApellidosCoDeudor" type="xs:string"/>
+      <xs:element name="direccionCoDeudor" type="xs:string"/>
+      <xs:element name="numeroCasaCoDeudor" type="xs:string" minOccurs="0"/>
+      <xs:element name="codigoCiudadCoDeudor" type="xs:integer"/>
+      <xs:element name="ciudadCoDeudor" type="xs:string"/>
+      <xs:element name="codigoDistritoCoDeudor" type="xs:integer"/>
+      <xs:element name="distritoCoDeudor" type="xs:string"/>
+      <xs:element name="codigoDepartamentoCoDeudor" type="xs:integer"/>
+      <xs:element name="departamentoCoDeudor" type="xs:string"/>
+      <xs:element name="codigoPaisCoDeudor" type="xs:integer"/>
+      <xs:element name="dPaisCoDeudor" type="xs:string"/>
+      <xs:element name="correoElectronicoCoDeudor" type="xs:string" minOccurs="0"/>
+      <xs:element name="numeroContactoCoDeudor" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tGDeudores">
+    <xs:sequence>
+      <xs:element name="gDeudor">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gFirmantesDeudorPersonaFisica">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="gFirmanteDeudorPersonaFisica" type="tFirmanteDeudorPersonaFisica" maxOccurs="unbounded"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="gCodeudor" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gFirmantesCoDeudorPersonaFisica">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="gFirmanteCoDeudorPersonaFisica" type="tFirmanteCoDeudorPersonaFisica" maxOccurs="unbounded"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tPrestadorServicioDTE">
+    <xs:sequence>
+      <xs:element name="nombrePSDTE" type="xs:string"/>
+      <xs:element name="nomFantasiaPSDTE" type="xs:string"/>
+      <xs:element name="rUCPSDTE" type="xs:string"/>
+      <xs:element name="resolucionMIC" type="xs:string"/>
+      <xs:element name="telefonoPSDTE" type="xs:string"/>
+      <xs:element name="emailPSDTE" type="xs:string"/>
+      <xs:element name="sitiowebPSDTE" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tGDatosGeneralesDTE">
+    <xs:sequence>
+      <xs:element name="codigoTipoDTE" type="xs:integer"/>
+      <xs:element name="descripcionTipoDTE" type="xs:string"/>
+      <xs:element name="numeroDTE" type="xs:integer"/>
+      <xs:element name="fechaEmisionDTE" type="xs:dateTime"/>
+      <xs:element name="fechaVencimientoDTE" type="xs:dateTime"/>
+      <xs:element name="codigoMonedaDTE" type="xs:string"/>
+      <xs:element name="descripcionMonedaDTE" type="xs:string"/>
+      <xs:element name="montoDTE" type="xs:decimal"/>
+      <xs:element name="montoDTELetras" type="xs:string"/>
+      <xs:element name="gLugarEmisionDTE" type="tDireccionEmision"/>
+      <xs:element name="gLugaresPagoDTE">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gLugarPagoDTE" type="tDireccionPago" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="gAcreedorInicial" type="tAcreedorInicial"/>
+      <xs:element name="TextoPromesaPago" type="xs:string"/>
+      <xs:element name="gCondicionesEmisorDTE">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gCondicionEmisorDTE" maxOccurs="unbounded">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element name="descripcionCondicionDTE" type="xs:string"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="gDeudores" type="tGDeudores"/>
+      <xs:element name="gPrestadorServicioDTE" type="tPrestadorServicioDTE"/>
+      <xs:element name="enlaceQRDTE" type="xs:string"/>
+      <!-- Firmas de emisión (Deudor, CoDeudor si corresponde, sello PSDTE) anidadas aquí mismo. -->
+      <xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- ===== Eventos ===== -->
+
+  <xs:complexType name="tFirmanteEndosantePersonaFisica">
+    <xs:sequence>
+      <xs:element name="condicionFirmante" type="xs:string"/>
+      <xs:element name="codigoTipoPersonaEndosante" type="xs:integer"/>
+      <xs:element name="tipoPersonaEndosante" type="xs:string"/>
+      <xs:element name="cTipoDocumentoEndosante" type="xs:integer"/>
+      <xs:element name="dTipoDocumentoEndosante" type="xs:string"/>
+      <xs:element name="dNumeroDocumentoEndosante" type="xs:string"/>
+      <xs:element name="codigoPaisDocumentoEndosante" type="xs:integer"/>
+      <xs:element name="nombrePaisDocumentoEndosante" type="xs:string"/>
+      <xs:element name="nombresApellidosEndosante" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tEndosatarioPersonaFisica">
+    <xs:sequence>
+      <xs:element name="codigoTipoPersonaEndosatario" type="xs:integer"/>
+      <xs:element name="tipoPersonaEndosatario" type="xs:string"/>
+      <xs:element name="cTipoDocumentoEndosatario" type="xs:integer"/>
+      <xs:element name="dTipoDocumentoEndosatario" type="xs:string"/>
+      <xs:element name="dNumeroDocumentoEndosatario" type="xs:string"/>
+      <xs:element name="codigoPaisDocumentoEndosatario" type="xs:integer"/>
+      <xs:element name="nombrePaisDocumentoEndosatario" type="xs:string"/>
+      <!-- Único bloque que usa "nombreEndosatario" (singular) en vez de "nombresApellidosXxx". -->
+      <xs:element name="nombreEndosatario" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="tGEventoEndoso">
+    <xs:sequence>
+      <xs:element name="numeroEvento" type="xs:string"/>
+      <xs:element name="fechaEvento" type="xs:dateTime"/>
+      <xs:element name="codigoTipoEvento" type="xs:integer" fixed="3"/>
+      <xs:element name="numeroEndoso" type="xs:string"/>
+      <xs:element name="tipoEvento" type="xs:string" fixed="ENDOSO"/>
+      <xs:element name="gEndosante">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gFirmanteEndosantePersonaFisica" type="tFirmanteEndosantePersonaFisica"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="gEndosatario">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="gEndosatarioPersonaFisica" type="tEndosatarioPersonaFisica"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="TextoEndoso" type="xs:string"/>
+      <xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="tGEventoPago">
+    <xs:sequence>
+      <xs:element name="numeroEvento" type="xs:string"/>
+      <xs:element name="fechaEvento" type="xs:dateTime"/>
+      <xs:element name="codigoTipoEvento" type="xs:integer" fixed="4"/>
+      <xs:element name="tipoEvento" type="xs:string" fixed="PAGO"/>
+      <xs:element name="numeroPago" type="xs:string"/>
+      <xs:element name="montoPagado" type="xs:decimal"/>
+      <xs:element name="saldoPendiente" type="xs:decimal"/>
+      <xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="tGEventoCancelacion">
+    <xs:sequence>
+      <xs:element name="numeroEvento" type="xs:string"/>
+      <xs:element name="fechaEvento" type="xs:dateTime"/>
+      <xs:element name="codigoTipoEvento" type="xs:integer" fixed="1"/>
+      <xs:element name="tipoEvento" type="xs:string" fixed="CANCELACION DEL DTE"/>
+      <xs:element name="motivo" type="xs:string"/>
+      <xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!--
+    xs:choice no puede discriminar por el valor de codigoTipoEvento (eso es XSD 1.1 con
+    assertions, no ampliamente soportado por libxmljs2/libxml2); se modela gEvento como tipo
+    laxo (xs:any relajado vía tGEventoGenerico) y la discriminación real por tipo la hace
+    `validator/` con reglas semánticas, no el XSD. Ver punto a confirmar al inicio del archivo.
+  -->
+  <xs:complexType name="tGEventoGenerico" mixed="false">
+    <xs:sequence>
+      <xs:any processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="ID" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <xs:element name="gEvento" type="tGEventoGenerico"/>
+
+  <xs:element name="gEventos">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="gEvento" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="ID" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="gDatosGeneralesDTE" type="tGDatosGeneralesDTE"/>
+
+  <xs:element name="DTE">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="gDatosGeneralesDTE"/>
+        <xs:element ref="gEventos" minOccurs="0"/>
+      </xs:sequence>
+      <xs:attribute name="id" type="xs:string" use="required"/>
+      <xs:attribute name="version" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="rDTE">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element ref="DTE"/>
+        <!-- Sello final observado en el XML de referencia: ds:Signature con URI="" (todo el
+             documento), hermano de DTE. No siempre presente (depende del último evento). -->
+        <xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

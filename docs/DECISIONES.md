@@ -26,6 +26,10 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
 - **Actualización 2026-07-22 (F1):** el usuario proveyó `db/modelo_datos_psdte.sql`. F1 queda desbloqueada
   y se ejecuta con el DDL real. El XML de referencia firmado sigue pendiente: F4 (xml-engine) permanece
   bloqueada hasta recibirlo.
+- **Actualización 2026-07-22 (cierre F4):** el usuario proveyó el XML de referencia firmado
+  (`firma_pagare_psdte_NO_TOCAR.xml`) — un intento previo había sido, de nuevo, el "Diploma Digital"
+  brasileño no relacionado, descartado sin usar. F4 queda desbloqueada y se cierra por completo; ver
+  ADR-014 para el detalle de la estructura real observada y las decisiones tomadas a partir de ella.
 
 ## ADR-002 — Docker no disponible en el sandbox de desarrollo remoto (F0)
 
@@ -252,3 +256,98 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   ausente de las declaraciones de tipos.
 - **Alternativas descartadas:** cambiar `NOMBRE_CA`/`NOMBRE_TSA` a texto solo-ASCII (más simple, pero se
   aparta del texto literal que especifica el plan sin necesidad, dado que el fix real es acotado).
+
+## ADR-014 — XML de referencia firmado recibido: cierre de F4 (builder/validator/XSD/parser)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F4 (cierre) / F5 ya cerrada
+- **Contexto:** ADR-001 dejó F4 bloqueada por el XML de referencia firmado del pagaré. El usuario lo
+  subió (`firma_pagare_psdte_NO_TOCAR.xml`, copiado verbatim a
+  `packages/xml-engine/test/fixtures/pagare-referencia-firmado.xml`, MD5 verificado). Un intento previo
+  había sido, de nuevo, el "Diploma Digital" brasileño no relacionado (ver ADR-001) — se descartó sin usar
+  antes de recibir el archivo correcto.
+- **Estructura real observada** (namespace `http://acraiz.gov.py/pagare/arhivos-en-xsd`, 9 `ds:Signature`,
+  4 `gEvento`):
+  - IDs `vDTE.../dDTE.../eDTE...` comparten el mismo sufijo correlativo, confirmando el diseño de
+    `IdDteService` (sección 5.3) ya implementado en el DDL (comentarios de `db/modelo_datos_psdte.sql`
+    ya anticipaban exactamente esta forma).
+  - Firmas anidadas, NO en la raíz del documento: 3 dentro de `gDatosGeneralesDTE` (Deudor, CoDeudor,
+    sello PSDTE — todas referencian solo `#dDTE...`), 2 dentro de cada `gEvento` de ENDOSO (parte +
+    sello PSDTE, ambas referenciando el evento propio Y el nodo anterior — `#dDTE...` para el primer
+    evento, `#eDTE...-NNN` anterior para los siguientes — I7 confirmado empíricamente), 1 dentro del
+    `gEvento` de PAGO (solo sello PSDTE), 0 dentro del `gEvento` de CANCELACION, y una firma final
+    (`URI=""`, todo el documento) como hermana de `<DTE>` bajo `<rDTE>`.
+  - Inconsistencias reales del propio XML de referencia (a tolerar al leer, nunca al generar):
+    `numeroEvento` no es secuencial (se repite "001" en varios eventos — la secuencia real es el sufijo
+    del atributo `ID`); `TextoPromesaPago`/`TextoEndoso` quedan con placeholders `[Clave]` sin resolver;
+    asimetría en el sufijo "país" (`codigoPaisEmision`/`dPaisAcreedor` sin "DTE", pero
+    `codigoPaisPagoDTE` sí lo lleva) entre bloques de dirección que por lo demás comparten el mismo
+    patrón de sufijo.
+- **Decisión:** se completó F4 con builder/validator/parser/XSD reales contra esta estructura exacta (no
+  inferida por convención): `packages/xml-engine/src/{modelo,builder,parser,validator,monto-letras}` +
+  `schema/pagare-dte.provisional.xsd`. El generador (`builder`) es estricto (revienta si un
+  placeholder queda sin resolver); el parser es tolerante (reporta esas mismas inconsistencias como
+  `avisos`, nunca lanza) — exactamente la asimetría que pide la sección 7 del plan. Test de integración
+  (`builder/firma-integracion.spec.ts`) reproduce el patrón completo de firmas anidadas + encadenamiento
+  I7 sobre un documento propio, y `parser/parser.spec.ts` lee el XML de referencia real completo (9
+  firmas, 4 eventos) reportando sus inconsistencias como avisos.
+- **Persona jurídica y `BLOQUEO` quedan fuera de alcance de este modelo**: ninguno está demostrado en el
+  XML de referencia; se documentan como "puntos a confirmar" en el propio XSD en vez de inventarse.
+  `BLOQUEO` se modela en F7 cuando haga falta, informado por lo que esa fase revele.
+
+## ADR-015 — `xades` extendido para firmar un nodo anidado específico (no solo la raíz del documento)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F4 (descubierto al construir el builder contra la estructura real del ADR-014)
+- **Contexto:** `firmarNodoXadesBes`/`completarConSelloTiempo` (F4 original) solo soportaban firmar el
+  documento completo de forma "enveloped" y adjuntar el resultado a `documento.documentElement` (la
+  raíz). Los tests de F4/F5 no lo notaron porque siempre firmaban documentos de una sola pieza donde el
+  nodo firmado ERA la raíz. El perfil real (ADR-014) necesita apilar hasta 3 firmas dentro de
+  `gDatosGeneralesDTE` y hasta 2 dentro de cada `gEvento` — nodos anidados, no la raíz.
+- **Decisión:** se agregaron dos parámetros opcionales, retrocompatibles (default = comportamiento
+  anterior): `uriNodoPrincipal` en `OpcionesFirmarXades` (URI de la referencia principal, antes
+  implícitamente `''` = todo el documento) y `nodoDestino` en `completarConSelloTiempo` (elemento donde
+  se inserta el `ds:Signature`, antes implícitamente la raíz). Verificado con un test nuevo
+  (`xades.spec.ts` — "apila varias firmas dentro de un nodo anidado") que 3 firmas apiladas en el mismo
+  nodo, cada una añadida después de la anterior, validan todas de forma independiente y que alterar el
+  contenido invalida las 3 — antes de escribir el builder completo, para no descubrir un problema de
+  arquitectura a mitad de una pieza mucho más grande.
+- **Alternativas descartadas:** firmar cada fragmento en un documento temporal aparte y trasplantar el
+  nodo firmado al documento final — más complejo (nodos cruzando de dueño de documento) para un beneficio
+  nulo, dado que xadesjs sí soporta referenciar un nodo interno directamente.
+
+## ADR-016 — Bug real: `RegExp` con bandera global reutilizado entre `.test()` pierde coincidencias
+
+- **Fecha:** 2026-07-22
+- **Fase:** F4
+- **Contexto:** el parser tolerante (`parser/index.ts`) usaba un único `RegExp` a nivel de módulo con la
+  bandera `g` para detectar placeholders `[Clave]` sin resolver, llamando a `.test()` varias veces (una
+  por texto libre: `TextoPromesaPago`, cada `TextoEndoso`). El test contra el XML de referencia real
+  esperaba 3 avisos `PLACEHOLDER_SIN_RESOLVER` y solo se reportaron 2 — intermitente según el orden de
+  llamadas. Causa: con la bandera `g`, `RegExp.prototype.test` mantiene `lastIndex` entre llamadas sobre
+  el mismo objeto, así que la búsqueda siguiente arranca donde terminó la anterior en vez de desde el
+  principio del string, produciendo falsos negativos cuando el placeholder aparece antes de esa posición.
+- **Decisión:** se quitó la bandera `g` del patrón (`PATRON_PLACEHOLDER`), ya que solo se usa para un
+  chequeo booleano (`.test()`), no para iterar coincidencias con `.exec()`/`.matchAll()`. Regla general
+  documentada en el propio código: nunca reusar un `RegExp` con estado (`g`/`y`) entre llamadas a
+  `.test()`/`.exec()` a menos que se resetee `lastIndex` explícitamente o se cree una instancia nueva.
+- **Alternativas descartadas:** resetear `lastIndex = 0` antes de cada `.test()` (funciona, pero es más
+  fácil de volver a romper por accidente que simplemente no usar `g` donde no hace falta).
+
+## ADR-017 — XSD provisional sin `xs:import` a un esquema remoto (xmldsig-core)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F4
+- **Contexto:** un primer borrador de `pagare-dte.provisional.xsd` importaba el XSD oficial de
+  `ds:Signature` vía `xs:import namespace="...xmldsig#" schemaLocation="http://www.w3.org/TR/.../xmldsig-core-schema.xsd"`.
+  Esto viola la restricción del plan (sección 0.2: "sin acceso a internet garantizado en runtime") —
+  `libxmljs2` intentaría resolver esa URL al compilar el esquema, rompiendo en cualquier entorno sin red
+  (CI, producción con egress restringido).
+- **Decisión:** dondequiera que el perfil admite un `ds:Signature` (dentro de `gDatosGeneralesDTE`, cada
+  `gEvento`, y el sello final bajo `rDTE`), el XSD usa
+  `<xs:any namespace="http://www.w3.org/2000/09/xmldsig#" processContents="skip"/>` en vez de tipar el
+  elemento. Es además más correcto conceptualmente: la validez de una firma (criptográfica, XAdES) la
+  determina `xades`/`validator`, no la validación estructural XSD — el XSD solo necesita saber que "ahí
+  puede haber cero o más nodos de firma", no validar su contenido interno.
+- **Alternativas descartadas:** vendorizar una copia local del XSD oficial de xmldsig-core (viable, pero
+  agrega un archivo de terceros a mantener por un beneficio que `xs:any` ya cubre sin esa carga).

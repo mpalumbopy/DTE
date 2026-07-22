@@ -117,25 +117,59 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 - **Decisiones registradas:** ADR-010 (advisory lock en auditoría).
 - **Pendiente:** ninguno para F3.
 
-## F4 — xml-engine (parcial: C14N, hash, XAdES-T)
+## F4 — xml-engine
 
 - **Fecha:** 2026-07-22
-- **Estado:** 🟡 parcial (ver ADR-011) — `builder`/`validator`/XSD provisional siguen bloqueados por el
-  XML de referencia
-- **Hecho:**
+- **Estado:** ✅ completa (cerrada tras recibir el XML de referencia — ver ADR-014)
+- **Hecho (parte genérica, cerrada primero — ver ADR-011):**
   - `packages/xml-engine/src/hash`: SHA-256 hex/base64.
   - `packages/xml-engine/src/c14n`: canonicalización C14N exclusiva (vía `xmldsigjs`).
   - `packages/xml-engine/src/xades`: `firmarNodoXadesBes` + `completarConSelloTiempo` (XAdES-T real:
     SignedProperties, SigningTime, referencias múltiples incluyendo encadenamiento a otro nodo por Id —
     I7 —, y `xades:SignatureTimeStamp` embebido) + `validarFirmaXades`, sobre el WebCrypto nativo de
-    Node 20 (sin dependencias de `@peculiar/webcrypto`).
-  - Tests reales (no mocks): firma válida, detección de alteración del contenido firmado, detección de
-    alteración de un nodo referenciado (I7), presencia del sello de tiempo embebido, determinismo de
-    C14N+hash. 8/8 verde, 92 % cobertura.
-- **Pendiente:** `builder/` (genera el XML del perfil desde objetos de dominio), `validator/` (XSD +
-  semántica) y `schema/pagare-dte.provisional.xsd` (ingeniería inversa del XML de referencia) — bloqueados
-  hasta recibir el XML correcto del pagaré.
-- **Decisiones registradas:** ADR-011.
+    Node 20 (sin dependencias de `@peculiar/webcrypto`). Extendido luego (ADR-015) con
+    `uriNodoPrincipal`/`nodoDestino` para firmar un nodo anidado específico, no solo la raíz.
+- **Hecho (perfil pagaré-DTE real, tras recibir el XML de referencia — ver ADR-014):**
+  - `packages/xml-engine/test/fixtures/pagare-referencia-firmado.xml`: copia verbatim (MD5 verificado)
+    del XML de referencia provisto por el usuario.
+  - `packages/xml-engine/schema/pagare-dte.provisional.xsd`: XSD reverse-engineered de la estructura real
+    (elementos, orden, cardinalidades, incluidas las asimetrías de nombres observadas), con los puntos a
+    confirmar documentados en el propio archivo — sin `xs:import` a esquemas remotos (ADR-017).
+  - `packages/xml-engine/src/modelo/tipos.ts`: modelo de dominio (persona física únicamente — jurídica y
+    BLOQUEO quedan fuera, no demostrados en la referencia).
+  - `packages/xml-engine/src/monto-letras`: conversor monto→letras es-PY (soporta hasta 999.999.999.999,
+    fracción "con NN/100"), 25 casos de test.
+  - `packages/xml-engine/src/builder`: `construirDatosGeneralesDte` + `agregarEvento` (ENDOSO/PAGO/
+    CANCELACION), con resolución obligatoria de placeholders `[Clave]` (`ErrorPlaceholderSinResolver` si
+    sobrevive alguno) — reproduce byte a byte el patrón de campos observado en el XML real, incluidas sus
+    inconsistencias de nomenclatura (se preservan, no se "corrigen": I8, el XML manda).
+  - `packages/xml-engine/src/parser`: `parsearDte`, tolerante — lee el XML de referencia real completo (9
+    firmas, 4 eventos), extrae el modelo de negocio, y reporta las inconsistencias conocidas
+    (`numeroEvento` no secuencial, placeholders sin resolver) como `avisos`, nunca como error.
+  - `packages/xml-engine/src/validator`: `validarContraXsd` (libxmljs2, `{nonet:true, noent:false,
+    dtdload:false}`) + `validarSemantica` (monto↔letras, vencimiento > emisión, `condicionFirmante`
+    única, coherencia temporal de eventos).
+  - Test de integración (`builder/firma-integracion.spec.ts`): construye datos generales + un evento de
+    endoso, firma 3+2 veces con `xades` directamente (sin mocks), sobre nodos anidados distintos, y
+    verifica que las 5 firmas validan de forma independiente y que alterar el evento no invalida las
+    firmas de emisión — reproduce el patrón exacto del XML real.
+  - `pnpm --filter xml-engine test` → 50/50 verde, 90.3 % cobertura de statements (≥85 % exigido).
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo; `pnpm test:cov` y `pnpm test:e2e` de
+    `apps/api` (24/24) siguen verdes tras la extensión de `xades`.
+- **Bugs reales encontrados y corregidos en el camino:**
+  - `xades`: `firmarNodoXadesBes`/`completarConSelloTiempo` solo soportaban firmar/adjuntar en la raíz del
+    documento — el perfil real necesita apilar firmas en nodos anidados (`gDatosGeneralesDTE`, cada
+    `gEvento`). Extendido de forma retrocompatible (ADR-015), verificado ANTES de escribir el builder
+    completo con un test dedicado de firmas apiladas en un nodo anidado.
+  - Parser: un `RegExp` con bandera `g` reutilizado entre varias llamadas a `.test()` perdía coincidencias
+    de forma intermitente por `lastIndex` (ADR-016) — detectado por el propio test contra el XML real
+    ("esperaba ≥3 avisos, recibió 2").
+  - XSD: un primer borrador importaba el XSD oficial de xmldsig-core desde una URL — violaba la
+    restricción de "sin red garantizada en runtime"; reemplazado por `xs:any` del namespace xmldsig
+    (ADR-017).
+- **Fuera de alcance (documentado, no adivinado):** persona jurídica (`codigoTipoPersona=2`) y `gEvento`
+  de tipo BLOQUEO — ninguno está demostrado en el XML de referencia; BLOQUEO se modela en F7.
+- **Decisiones registradas:** ADR-011, ADR-014, ADR-015, ADR-016, ADR-017.
 
 ## F5 — crypto-providers + simulador + ProviderFactory
 
@@ -200,12 +234,12 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
-- XML firmado de referencia del pagaré: **pendiente**. Un primer intento de subida (2026-07-22) resultó
-  ser un archivo no relacionado (un "Diploma Digital" del MEC de Brasil, namespace
-  `http://portal.mec.gov.br/diplomadigital/arquivos-em-xsd`) — se avisó al usuario y se descartó sin
-  usarlo. El resto de F4 (builder/validator/XSD) sigue bloqueado hasta recibir el XML correcto.
+- XML firmado de referencia del pagaré: **recibido** (2026-07-22,
+  `packages/xml-engine/test/fixtures/pagare-referencia-firmado.xml`), usado para cerrar F4. Dos intentos
+  previos de subida resultaron ser el mismo archivo no relacionado (un "Diploma Digital" del MEC de
+  Brasil, namespace `http://portal.mec.gov.br/diplomadigital/arquivos-em-xsd`) — se avisó al usuario y se
+  descartó sin usarlo ambas veces. Ver ADR-014 para el detalle de la estructura real observada.
 
 ## Próximos pasos
 
-- F4 (xml-engine): builder/validator/XSD pendientes de recibir el XML de referencia firmado del pagaré.
-- F6 (Emisión): siguiente fase autónoma a ejecutar.
+- F6 (Emisión): en curso — siguiente fase autónoma a ejecutar.

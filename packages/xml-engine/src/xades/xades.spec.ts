@@ -104,6 +104,50 @@ describe('xades (XAdES-T sobre WebCrypto nativo de Node)', () => {
     expect(Buffer.from(contenidoBase64!, 'base64').toString('utf8')).toBe('token-rfc3161-simulado');
   });
 
+  it('apila varias firmas dentro de un nodo anidado (no la raíz), cada una válida por separado', async () => {
+    // Reproduce el patrón real del perfil pagaré-DTE: gDatosGeneralesDTE recibe 3 firmas propias
+    // (Deudor, CoDeudor, sello PSDTE), cada una referenciando el nodo por su id, no la raíz.
+    const documento = Parse(
+      '<rDTE xmlns="urn:psdte:test"><DTE id="vDTE-1"><gDatosGeneralesDTE id="dDTE-1">contenido</gDatosGeneralesDTE></DTE></rDTE>',
+    );
+    const nodoDatosGenerales = documento.getElementsByTagName('gDatosGeneralesDTE')[0] as unknown as Element;
+
+    for (let i = 0; i < 3; i += 1) {
+      const claves = await generarClaves();
+      const pendiente = await firmarNodoXadesBes(documento, {
+        clavePrivada: claves.privateKey,
+        clavePublica: claves.publicKey,
+        certificadoDer: CERT_DER_PRUEBA,
+        uriNodoPrincipal: '#dDTE-1',
+      });
+      completarConSelloTiempo(documento, pendiente, Buffer.from(`token-${i}`), nodoDatosGenerales);
+    }
+
+    const xmlFirmado = serializar(documento);
+    const doc2 = Parse(xmlFirmado);
+    const firmas = doc2.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#', 'Signature');
+    expect(firmas.length).toBe(3);
+    for (let i = 0; i < 3; i += 1) {
+      const resultado = await validarFirmaXades(doc2, firmas[i] as unknown as Element);
+      expect(resultado.valida).toBe(true);
+    }
+
+    // Las 3 firmas deben quedar anidadas DENTRO de gDatosGeneralesDTE, no como hijas de la raíz.
+    const nodoDatosGenerales2 = doc2.getElementsByTagName('gDatosGeneralesDTE')[0] as unknown as Element;
+    expect(nodoDatosGenerales2.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#', 'Signature').length).toBe(
+      3,
+    );
+
+    // Alterar el contenido invalida las 3, porque todas referencian el mismo nodo (dDTE-1).
+    const alterado = xmlFirmado.replace('contenido', 'contenido ALTERADO');
+    const doc3 = Parse(alterado);
+    const firmasAlteradas = doc3.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#', 'Signature');
+    for (let i = 0; i < 3; i += 1) {
+      const resultado = await validarFirmaXades(doc3, firmasAlteradas[i] as unknown as Element);
+      expect(resultado.valida).toBe(false);
+    }
+  });
+
   it('canonicalizarExclusivo + sha256Hex son consistentes entre dos parseos del mismo XML', () => {
     const xml = '<root xmlns="urn:psdte:test"><a>1</a><b>2</b></root>';
     const doc1 = Parse(xml);

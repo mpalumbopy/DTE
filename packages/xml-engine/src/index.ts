@@ -2,3 +2,8 @@ export * from './hash';
 export * from './c14n';
 export * from './xades';
 export * from './bootstrap-node';
+export * from './modelo/tipos';
+export * from './monto-letras';
+export * from './builder';
+export * from './parser';
+export * from './validator';
