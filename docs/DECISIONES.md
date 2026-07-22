@@ -109,3 +109,48 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   liviano que Testcontainers para este proyecto (no requiere levantar contenedores por test). Se mantiene
   como patrón para F7 (tests de concurrencia) y sucesivas fases de integración, salvo que una fase
   requiera específicamente el aislamiento por contenedor que ofrece Testcontainers.
+
+## ADR-007 — Columnas de familia de sesión para rotación de refresh (F2)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F2
+- **Contexto:** el plan (sección 0.4 y 5.2) exige refresh rotativo con detección de reuso ("revoca
+  familia"). La tabla `sesion` del DDL de referencia no tiene columnas para modelar la cadena de
+  rotación (no hay `familia_id` ni referencia a la sesión que reemplaza a otra).
+- **Decisión:** migración `016_sesion_familia.sql` agrega `familia_id UUID` (compartido por todas las
+  sesiones nacidas del mismo login; se propaga en cada rotación) y `reemplazada_por_id UUID` (apunta a la
+  sesión que la reemplazó). Al detectar uso de un refresh cuya sesión ya tiene `revocada_en` o
+  `reemplazada_por_id` distinto de NULL, `AuthService` revoca todas las sesiones con el mismo `familia_id`.
+- **Alternativas descartadas:** una tabla aparte `sesion_familia`; se descarta por ser más compleja sin
+  aportar nada que dos columnas no resuelvan para este caso de uso.
+
+## ADR-008 — `"incremental": true` de TypeScript removido del tsconfig base (F2)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F2
+- **Contexto:** con `incremental: true` en `tsconfig.base.json`, cada paquete comparte un único
+  `tsconfig.tsbuildinfo` entre su script `build` (`tsc`/`nest build`, con emisión) y su script `typecheck`
+  (`tsc --noEmit`, sin emisión). Correr `typecheck` antes de `build` dejaba el `tsbuildinfo` en un estado
+  que hacía que la siguiente corrida de `build` no reemitiera `.js` (solo quedaban los `.d.ts`), rompiendo
+  `nest build` de forma intermitente y silenciosa (exit code 0, sin `dist/main.js`).
+- **Decisión:** se quitó `incremental` de `tsconfig.base.json`. Los paquetes son lo bastante chicos como
+  para que el costo de una recompilación completa sea despreciable; a cambio se elimina una clase entera
+  de fallas de build intermitentes. `apps/web` mantiene su propio `incremental: true` porque `next build`
+  no comparte ese `tsbuildinfo` con ningún script `tsc --noEmit` (su `typecheck` no interfiere).
+- **Nota operativa:** si en algún momento se reintroduce `incremental` para acelerar builds grandes,
+  usar `tsBuildInfoFile` distintos para `build` y `typecheck` (p. ej. `dist/.tsbuildinfo` vs
+  `.typecheck.tsbuildinfo`) para no repetir este problema.
+
+## ADR-009 — `.env.test` se commitea (excepción explícita en `.gitignore`)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F2
+- **Contexto:** el workflow de CI (`db:reset:test`, `test:e2e`) necesita `.env.test` con `DATABASE_URL`
+  (`psdte_test`), `APP_ENCRYPTION_KEY` y un par JWT RS256, pero el patrón `.env.*` de `.gitignore` lo
+  excluía y CI no tiene forma de generarlo sin secretos reales.
+- **Decisión:** `.env.test` contiene únicamente valores fijos de prueba (clave RS256 y `APP_ENCRYPTION_KEY`
+  generados solo para tests, `HMAC_CALLBACK_SECRET=test-hmac-secret`, etc.) — nada que proteja datos reales
+  ni un entorno expuesto. Se agrega `!.env.test` a `.gitignore` y se commitea. **Nunca** reutilizar estos
+  valores en `.env` de producción/staging.
+- **Alternativas descartadas:** generar `.env.test` en un paso de CI (más pasos, sin beneficio real ya que
+  los valores no son secretos); usar GitHub Secrets (innecesario para claves que no protegen nada real).

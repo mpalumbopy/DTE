@@ -64,5 +64,11 @@ INSERT INTO psdte.cat_error (codigo,http_status,mensaje,categoria) VALUES
  ('ERR-CTRL-001',403,'El solicitante no es el tenedor/controlador vigente','AUTORIZACION'),
  ('ERR-DTE-404',404,'DTE inexistente','VALIDACION_SEMANTICA'),
  ('ERR-DTE-409',409,'ID-DTE ya registrado: singularidad violada','VALIDACION_SEMANTICA'),
+ ('ERR-SISTEMA-001',500,'Error interno del servidor','SISTEMA'),
+ ('ERR-AUTH-001',401,'Credenciales inválidas','AUTORIZACION'),
+ ('ERR-AUTH-002',401,'Sesión inválida, expirada o revocada','AUTORIZACION'),
+ ('ERR-AUTH-003',403,'Código MFA inválido','AUTORIZACION'),
+ ('ERR-AUTH-004',403,'MFA requerida y no verificada para este rol','AUTORIZACION'),
+ ('ERR-AUTH-005',423,'Usuario bloqueado por intentos fallidos','AUTORIZACION'),
  ('ERR-PKI-503',503,'Servicio PCSC/TSL no disponible: degradación controlada','PKI')
 ON CONFLICT (codigo) DO NOTHING;
