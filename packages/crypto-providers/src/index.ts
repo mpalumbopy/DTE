@@ -1,3 +1,13 @@
-// Puertos (FirmaProviderPort, TsaProviderPort, RevocacionProviderPort), simulador y ProviderFactory
-// se implementan en F5 (ver docs/PLAN.md sección 6).
-export const CRYPTO_PROVIDERS_PLACEHOLDER = true;
+export * from './ports';
+export * from './provider-factory';
+export * from './proveedor-deshabilitado';
+export * from './simulador/ca';
+export * from './simulador/firma.simulador';
+export * from './simulador/tsa.simulador';
+export * from './simulador/revocacion.simulador';
+export * from './http/cliente-http';
+export * from './http/adaptador-base';
+export * from './http/firma-http.adapter';
+export * from './http/tsa-http.adapter';
+export * from './http/revocacion-http.adapter';
+export * from './http/plantilla';

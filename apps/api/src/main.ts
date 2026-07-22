@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { Logger } from 'nestjs-pino';
@@ -8,12 +8,39 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { EnvConfig } from './config/config.schema';
+import { ProviderFactoryService } from './modules/integraciones/provider-factory.service';
+
+/**
+ * Candado de producción (ver docs/PLAN.md sección 6.2): sin fallback automático a simulador en
+ * prod. Si ALLOW_SIMULATOR=false y alguna integración crítica (FIRMA/TSA/OCSP) sigue en modo
+ * SIMULADOR, el arranque falla con un mensaje claro en vez de servir tráfico degradado.
+ */
+export async function verificarCandadoSimulador(
+  app: INestApplication,
+  configService: ConfigService<EnvConfig, true>,
+): Promise<void> {
+  const esProduccion = configService.get('NODE_ENV', { infer: true }) === 'production';
+  const permiteSimulador = configService.get('ALLOW_SIMULATOR', { infer: true });
+  if (!esProduccion || permiteSimulador) {
+    return;
+  }
+  const providerFactory = app.get(ProviderFactoryService);
+  const { enSimulador, tipos } = await providerFactory.estadoSimuladorCritico();
+  if (enSimulador) {
+    throw new Error(
+      `Arranque bloqueado: ALLOW_SIMULATOR=false pero las integraciones críticas [${tipos.join(', ')}] ` +
+        'siguen en modo SIMULADOR. Configúralas en modo REAL o DESHABILITADO desde /admin/integraciones ' +
+        'antes de desplegar a producción.',
+    );
+  }
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
 
   const configService = app.get(ConfigService<EnvConfig, true>);
+  await verificarCandadoSimulador(app, configService);
 
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
@@ -46,4 +73,12 @@ async function bootstrap() {
   await app.listen(port);
 }
 
-bootstrap();
+// `require.main === module` evita arrancar la app (y su app.listen) cuando este archivo se importa
+// desde un test (p. ej. para reusar verificarCandadoSimulador) en vez de ejecutarse directamente.
+if (require.main === module) {
+  bootstrap().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

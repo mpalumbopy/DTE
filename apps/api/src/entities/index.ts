@@ -17,3 +17,4 @@ export * from './cat-rol-permiso.entity';
 export * from './persona.entity';
 export * from './persona-direccion.entity';
 export * from './parametro-sistema.entity';
+export * from './integracion-ws.entity';

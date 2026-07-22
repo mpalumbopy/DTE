@@ -5,6 +5,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "baseUrl": "src",
+    "lib": ["ES2022", "DOM"],
     "strictPropertyInitialization": false
   },
   "include": ["src/**/*.ts"],

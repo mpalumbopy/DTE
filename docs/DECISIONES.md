@@ -202,3 +202,53 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   (`xades/test-cert.ts`, excluido del build vía `tsconfig.json`), porque `xadesjs` valida el DER del
   certificado embebido (`pkijs`) y un buffer arbitrario no sirve. La generación real de certificados para
   el simulador (CA efímera) vive en `packages/crypto-providers`, no acá.
+
+## ADR-012 — Bug real en `pkijs` al verificar `SignedData` de un TSTInfo (RFC 3161)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F5
+- **Contexto:** al construir `TsaSimulador` (token RFC 3161 con `pkijs`: `TSTInfo` → `SignedData` →
+  `ContentInfo`), se intentó usar el método de conveniencia `SignedData.verify()` de `pkijs` para
+  confirmar que el token generado era válido. Falló con `"Error during verification: TSTInfo wrong
+  ASN.1 schema"` de forma consistente. Se leyó el propio código fuente de `pkijs` (paquete instalado,
+  `pkijs@3.4.0`) y se confirmó el bug: tras un round-trip de DER, `EncapsulatedContentInfo.eContent`
+  queda envuelto en un tag `[0] EXPLICIT` (constructed, con un único hijo = el `OCTET STRING` real), pero
+  la rama de detección de TSTInfo dentro de `verify()` llama a
+  `TSTInfo.fromBER(this.encapContentInfo.eContent.valueBlock.valueHexView)` directamente sobre ese
+  envoltorio sin desenvolverlo primero — el parseo del TSTInfo real nunca llega a ejecutarse con datos
+  válidos.
+- **Decisión:** no usar `SignedData.verify()` de `pkijs` para tokens TSTInfo. `leerTokenTsa()`
+  (`packages/crypto-providers/src/simulador/tsa.simulador.ts`) desenvuelve manualmente
+  `eContent.valueBlock.value[0].valueBlock.valueHexView` antes de llamar a `TSTInfo.fromBER`, y valida el
+  token a nivel de campos (parsea `genTime`, `policy`, `hashedMessage` y el certificado firmante — el DoD
+  de F5 exige que el token "parsee como RFC3161", no que pase por el `.verify()` de una librería con este
+  bug puntual). Cubierto por test (`simulador.spec.ts` — "sella un hash y el token resultante parsea como
+  RFC 3161").
+- **Alternativas descartadas:** cambiar de librería (asn1.js/otro RFC3161 toolkit) — cambio de mayor
+  alcance para un bug acotado a un solo método de conveniencia que no se usa en el resto de la app;
+  parchear `pkijs` (fragiliza ante actualizaciones de la dependencia).
+
+## ADR-013 — `node-forge` corrompe el DER de un `commonName` con caracteres no-ASCII si no se fuerza UTF8String
+
+- **Fecha:** 2026-07-22
+- **Fase:** F5
+- **Contexto:** el plan (sección 6.3) especifica el nombre literal de la CA/TSA simuladas con un em-dash y
+  vocal acentuada: `"AC SIMULADA PSDTE — NO VÁLIDA LEGALMENTE"`. Al generar la CA con `node-forge`
+  (`generarAutoridadSimulada`) y luego intentar releer el propio certificado recién generado
+  (`forge.pki.certificateFromPem(...)`), el parseo fallaba de forma determinística con `"Too few bytes to
+  parse DER"` — reproducido también fuera de Jest (script `ts-node` aislado), descartando una causa de
+  entorno de test. Inspeccionando el DER decodificado se vio la codificación corrupta exactamente en el
+  tramo del em-dash/Á. Se confirmó la causa leyendo el código fuente de `node-forge` (`x509.js`,
+  `_dnToAsn1`): el tipo ASN.1 por defecto para el valor de un atributo del subject/issuer es
+  `PrintableString` (que no admite estos caracteres) **salvo** que el objeto de campo incluya
+  `valueTagClass`, en cuyo caso, si es `UTF8`, la librería sí codifica el valor como UTF8String
+  (`forge.util.encodeUtf8`) antes de serializarlo — sin ese flag, el string se serializa igual pero con un
+  tag/longitud que no corresponde a su contenido real en UTF-8, corrompiendo el resto del `TBSCertificate`.
+- **Decisión:** en `crearNombre()` (`packages/crypto-providers/src/simulador/ca.ts`), el atributo
+  `commonName` se construye con `valueTagClass: forge.asn1.Type.UTF8` explícito, preservando el texto
+  exacto del plan (em-dash y acentos incluidos) en vez de sustituirlo por una variante solo-ASCII. Los
+  tipos de `@types/node-forge` no declaran `valueTagClass` en `CertificateField`, así que se castea
+  puntualmente (`as unknown as forge.pki.CertificateField`) — es un campo real soportado en runtime, solo
+  ausente de las declaraciones de tipos.
+- **Alternativas descartadas:** cambiar `NOMBRE_CA`/`NOMBRE_TSA` a texto solo-ASCII (más simple, pero se
+  aparta del texto literal que especifica el plan sin necesidad, dado que el fix real es acotado).

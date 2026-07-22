@@ -137,6 +137,66 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   hasta recibir el XML correcto del pagaré.
 - **Decisiones registradas:** ADR-011.
 
+## F5 — crypto-providers + simulador + ProviderFactory
+
+- **Fecha:** 2026-07-22
+- **Estado:** ✅ completa
+- **DoD ejecutado (docs/PLAN.md sección 13):**
+  - Puertos estables (`FirmaProviderPort`, `TsaProviderPort`, `RevocacionProviderPort`,
+    `packages/crypto-providers/src/ports.ts`) — sección 6.1.
+  - Simulador (sección 6.3): CA raíz + TSA intermedia efímeras (`node-forge`), `FirmaSimulador` (emite
+    certificado F3-like al vuelo, firma XAdES-T real vía `@psdte/xml-engine`), `TsaSimulador` (token RFC
+    3161 real con `pkijs`/`asn1js`), `RevocacionSimulador` (GOOD/enTsl:true por defecto,
+    OU=REVOCADO-TEST → REVOKED para QA). Firma simulada sobre un nodo de prueba **valida
+    criptográficamente** con un verificador XAdES independiente; el token TSA parsea sus campos
+    (genTime/policy/hashedMessage/certificado) como RFC 3161. 7/7 tests verdes.
+  - Adaptadores HTTP genéricos (sección 6.4): `ClienteHttp` (auth NONE/BASIC/BEARER/API_KEY/MTLS,
+    reintentos con backoff, timeout, sin dependencias externas — `http`/`https` nativos para poder
+    configurar mTLS), plantillas `{{a.b.c}}` para request y JSONPath mínimo + `map_estado` para response,
+    adaptadores `FirmaHttpAdapter`/`TsaHttpAdapter`/`RevocacionHttpAdapter`. Pasan contra un servidor mock
+    local (los 4 tipos de auth, mapeo con `map_estado`, reintentos, timeout). 9/9 tests verdes.
+  - `ProviderFactory` (sección 6.2, `provider-factory.ts`): funciones puras
+    `crearProveedorFirma/Tsa/Revocacion` que resuelven SIMULADOR/REAL/DESHABILITADO — ningún adaptador
+    concreto se importa fuera de acá.
+  - Lado NestJS (`apps/api/src/modules/integraciones/`): `IntegracionWs` entity (mapea la tabla real),
+    `PkiSimuladaService` (genera la CA/TSA una única vez y las persiste cifradas — AES-256-GCM — en
+    `parametro_sistema['simulador.pki']`, con `ON CONFLICT DO NOTHING` para que dos procesos concurrentes
+    no generen autoridades distintas), `ProviderFactoryService` (lee `integracion_ws` con cache de 60s por
+    tipo, invalidable con `invalidarCache()`, descifra credenciales/mTLS antes de armar el adaptador HTTP).
+  - Candado `ALLOW_SIMULATOR` (`apps/api/src/main.ts`, `verificarCandadoSimulador`): con
+    `NODE_ENV=production` y `ALLOW_SIMULATOR=false`, si FIRMA/TSA/OCSP siguen en modo SIMULADOR el
+    arranque falla (`bootstrap().catch(...)` con mensaje claro y `process.exit(1)`) antes de escuchar en
+    el puerto; en desarrollo o con `ALLOW_SIMULATOR=true` no bloquea.
+  - Test e2e nuevo (`apps/api/test/integraciones/provider-factory.e2e-spec.ts`, 6 casos, contra
+    Postgres/Redis reales): `ProviderFactoryService.obtenerProveedorFirma()` resuelto desde la BD (seed en
+    SIMULADOR) produce una firma que valida criptográficamente; `obtenerProveedorTsa()` produce un token
+    RFC3161 válido; `estadoSimuladorCritico()` refleja el seed; `verificarCandadoSimulador` no bloquea en
+    dev ni con `ALLOW_SIMULATOR=true`, y bloquea en prod si falta configurar las integraciones críticas.
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo; `pnpm test:cov` (unitarios) y
+    `pnpm test:e2e` (4 suites, 24 casos) en verde.
+- **Bugs reales encontrados y corregidos en el camino:**
+  - `pkijs`: `SignedData.verify()` falla sobre TSTInfo por un bug de la propia librería al desenvolver
+    `eContent` tras un round-trip de DER (ver ADR-012). Se lee el token a mano (`leerTokenTsa`) en vez de
+    depender de ese método.
+  - `node-forge`: el `commonName` de la CA/TSA simuladas (con em-dash y acentos, tal como lo especifica el
+    plan) corrompía el DER del certificado al re-leerlo, porque `node-forge` codifica atributos del
+    subject como `PrintableString` por defecto (ver ADR-013). Corregido forzando `valueTagClass:
+    forge.asn1.Type.UTF8` en el campo `commonName`.
+  - Tipo `MapeoOperacion.response` demasiado angosto (`Record<string,string>`) no permitía las tablas de
+    traducción `map_estado` que sí soporta `mapearRespuesta()` en runtime — corregido ampliando el tipo a
+    `Record<string, string | Record<string,string>>`.
+  - `apps/api` no resolvía los tipos DOM (`Element`/`Document`) al importar la API pública de
+    `@psdte/xml-engine` en tests, mismo síntoma que en `crypto-providers` (F5, ver más abajo): agregado
+    `"lib": ["ES2022", "DOM"]` a `apps/api/tsconfig.json`.
+  - `packages/crypto-providers/tsconfig.json` necesitó el mismo agregado de `"lib": ["ES2022", "DOM"]`
+    porque `@xmldom/xmldom` solo propaga su `/// <reference lib="dom" />` a quien lo importa
+    directamente (`xml-engine`), no a quien consume su output compilado (`crypto-providers`).
+- **Decisiones registradas:** ADR-012 (bug de `pkijs` en `SignedData.verify()` con TSTInfo), ADR-013
+  (codificación UTF8String forzada en `node-forge` para el `commonName`).
+- **Pendiente:** la UI de administración de integraciones (`/admin/integraciones`, sección 6.5) y el
+  chequeo de integraciones activas en `/readyz` quedan para F10/F13 respectivamente — no son parte del DoD
+  de F5.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -148,4 +208,4 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 ## Próximos pasos
 
 - F4 (xml-engine): builder/validator/XSD pendientes de recibir el XML de referencia firmado del pagaré.
-- F5 (crypto-providers/simulador): no depende de insumos externos, en curso.
+- F6 (Emisión): siguiente fase autónoma a ejecutar.
