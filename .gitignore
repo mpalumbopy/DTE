@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+.turbo/
+.DS_Store
+*.tsbuildinfo
+/db/migrations/.pgmigrate-cache
+/infra/dev/.data/
+/packages/*/dist/
+/apps/*/dist/
+/apps/web/.next/
+/scratchpad/
