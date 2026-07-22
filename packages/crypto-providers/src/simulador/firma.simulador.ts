@@ -56,6 +56,7 @@ export class FirmaSimulador implements FirmaProviderPort {
       clavePublica: keys.publicKey,
       certificadoDer: certificado.certificadoDer,
       referenciasAdicionales: req.referencias.map((uri) => ({ uri })),
+      uriNodoPrincipal: req.uriNodoPrincipal,
     });
 
     const hashFirma = createHash('sha256').update(pendiente.valorFirma).digest();

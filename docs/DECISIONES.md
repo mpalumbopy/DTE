@@ -351,3 +351,78 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   puede haber cero o más nodos de firma", no validar su contenido interno.
 - **Alternativas descartadas:** vendorizar una copia local del XSD oficial de xmldsig-core (viable, pero
   agrega un archivo de terceros a mantener por un beneficio que `xs:any` ya cubre sin esa carga).
+
+## ADR-018 — El borrador de emisión vive en Redis, no en `dte`: `cat_estado_dte` no modela "antes de emitido"
+
+- **Fecha:** 2026-07-22
+- **Fase:** F6
+- **Contexto:** el plan describe `POST /dte/emisiones` como "crear borrador" y luego `.../firmas/solicitar`
+  y `.../confirmar` como pasos separados. Pero `dte.estado_actual` tiene una FK NOT NULL a
+  `cat_estado_dte`, y ese catálogo **solo tiene estados posteriores a la emisión**
+  (EMITIDO/ENDOSADO/PAGADO_.../BLOQUEADO/CANCELADO/VENCIDO — ningún "BORRADOR"). Además,
+  `fn_aplicar_evento` exige que la fila `dte` ya exista (`SELECT ... FOR UPDATE ... WHERE id = p_dte_id`,
+  `ERR-DTE-404` si no) y `cat_tipo_evento` no tiene un código "EMISION" (solo
+  CANCELACION/BLOQUEO/ENDOSO/PAGO/...). Esto confirma que, en este modelo, la emisión **no es un evento
+  aplicado a un DTE existente** — es el acto que crea la fila `dte` misma, ya en estado EMITIDO; el
+  `dte_evento` (con `fn_aplicar_evento`) solo registra lo que pasa **después** de emitido.
+- **Decisión:** el "borrador" (datos generales sin confirmar, con o sin firmas de las partes ya
+  recolectadas) se guarda en Redis (`BorradorEmisionStore`, TTL 24h, clave = `idDatosGenerales`), no en
+  Postgres. Es un dato transitorio y sin valor legal todavía (I8 no aplica: el XML/DTE todavía no existe),
+  así que perderlo ante un reinicio de Redis es aceptable — el operador simplemente vuelve a crear el
+  borrador. `POST .../confirmar` es la única operación que escribe en Postgres, y lo hace de forma
+  totalmente transaccional (`dte`, `dte_parte`, `dte_lugar_pago`, `dte_condicion`, `dte_tenencia`,
+  `dte_xml_version`, `certificado`, `firma`, `evidencia`, `notificacion` en una sola transacción — I10).
+  `solicitud_firma` es la única excepción: se persiste ya durante `.../firmas/solicitar` (su columna
+  `dte_id` es nullable justamente para este caso) para no perder trazabilidad del intercambio con el
+  proveedor de firma mientras el DTE aún no existe; `confirmar` la actualiza con el `dte_id` real al
+  final de la transacción.
+- **Alternativas descartadas:** agregar un estado `BORRADOR` a `cat_estado_dte` y crear la fila `dte`
+  desde el primer paso — se descarta porque el DDL de referencia (provisto por el usuario) claramente no
+  lo contempla, y forzarlo requeriría inventar semántica no confirmada (qué pasa con `hash_vigente`,
+  `version_vigente`, etc. antes de tener un XML real) — más riesgo que beneficio dado que Redis ya resuelve
+  el problema sin tocar el modelo de datos de referencia.
+
+## ADR-019 — Firmar con referencia vacía (`URI=""`) no sobrevive re-anidar el nodo firmado
+
+- **Fecha:** 2026-07-22
+- **Fase:** F6
+- **Contexto:** el patrón de emisión firma `gDatosGeneralesDTE` de forma incremental (Deudor → CoDeudor →
+  sello PSDTE, cada uno recibiendo el XML ya firmado por el anterior) y luego **envuelve** ese fragmento
+  ya firmado dentro de `<rDTE><DTE>...` para persistirlo (igual que el XML de referencia real, ver
+  ADR-014). `FirmaSimulador.solicitarFirma()` (F5) siempre firmaba con referencia vacía (`URI=""`,
+  "todo el documento") porque hasta ahora sus tests solo firmaban documentos de una sola pieza. Al
+  reproducir el flujo completo (e2e de F6), la firma del sello PSDTE (o cualquiera de las 3) fallaba al
+  validar con `ERR-FIRMA-001` **después** de envolver el fragmento en `rDTE>DTE`, aunque validaba
+  correctamente **antes** de envolverlo. Causa: `URI=""` en XMLDSig se resuelve contra "todo el documento
+  que contiene la firma" en el momento de **validar** — al mover `gDatosGeneralesDTE` de ser la raíz de su
+  propio documento a ser hijo de `<DTE>` dentro de `<rDTE>`, "todo el documento" pasó a incluir `rDTE`/`DTE`
+  también, cambiando el contenido canonicalizado y por lo tanto el hash esperado. Se confirmó con un
+  script de reproducción aislado (firmar con `URI=""`, envolver, revalidar → falla) contra uno idéntico
+  pero con `URI="#dDTE-1"` (referencia explícita por id) → sigue validando tras envolver, porque exclusive
+  C14N canonicaliza el subárbol referenciado por id sin importar sus ancestros (para eso existe la
+  canonicalización exclusiva). El propio XML de referencia real ya usa `URI="#dDTE..."` explícito para
+  las 3 firmas de emisión (nunca `URI=""`) — confirma que este es el patrón correcto, no una elección
+  arbitraria.
+- **Decisión:** se agregó `uriNodoPrincipal?: string` a `SolicitarFirmaRequest`
+  (`packages/crypto-providers/src/ports.ts`), y `FirmaSimulador.solicitarFirma()` lo pasa a
+  `firmarNodoXadesBes` (extensión ya soportada desde ADR-015). `EmisionService` pasa
+  `uriNodoPrincipal: '#'+idDatosGenerales` en cada llamada a `solicitarFirma` (partes y sello PSDTE).
+  Campo opcional, retrocompatible: sin él, el comportamiento (`URI=""`) no cambia, así que los tests de
+  F5 (que sí firman documentos de una sola pieza) siguen pasando sin modificación.
+- **Alternativas descartadas:** no envolver el fragmento firmado y usar `gDatosGeneralesDTE` como raíz del
+  documento persistido — se descarta porque el XML de referencia real usa `rDTE>DTE>gDatosGeneralesDTE`
+  como estructura, y "el XML manda" (I8): el documento persistido debe tener esa forma exacta.
+
+## ADR-020 — Entidades de catálogos geográficos/documento agregadas recién en F6 (primer consumidor real)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F6
+- **Contexto:** `cat_pais`, `cat_departamento`, `cat_distrito`, `cat_ciudad`, `cat_moneda` y
+  `cat_tipo_documento_identidad` existen desde F1 (migraciones + seeds) pero no tenían entidad TypeORM:
+  hasta F6 nada los necesitaba como relación (persona/dte solo guardan el código, y `CatalogosService`
+  de F3 no los expone por no ser parte de la serie CAT-DTE-01..10). El builder del perfil pagaré-DTE
+  (`DireccionInput`, `DocumentoIdentidadInput`) sí necesita el **nombre**, no solo el código, para poder
+  generar el XML.
+- **Decisión:** se agregaron entidades mínimas (solo columnas, sin relaciones TypeORM) para estas 6
+  tablas, usadas por `EmisionService` para resolver nombre desde código antes de llamar al builder de
+  `@psdte/xml-engine`. No se expone un endpoint nuevo para ellas (no lo pidió ninguna fase todavía).

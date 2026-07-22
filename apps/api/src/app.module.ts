@@ -17,6 +17,7 @@ import { CatalogosModule } from './modules/catalogos/catalogos.module';
 import { PersonasModule } from './modules/personas/personas.module';
 import { ParametrosModule } from './modules/parametros/parametros.module';
 import { IntegracionesModule } from './modules/integraciones/integraciones.module';
+import { EmisionModule } from './modules/emision/emision.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CatalogoErrorService } from './common/filters/catalogo-error.service';
 import { CatalogoErrorFilter } from './common/filters/catalogo-error.filter';
@@ -53,6 +54,7 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     PersonasModule,
     ParametrosModule,
     IntegracionesModule,
+    EmisionModule,
   ],
   controllers: [AppController],
   providers: [

@@ -14,6 +14,16 @@ export interface SolicitarFirmaRequest {
   xmlCanonico: Buffer;
   /** URIs adicionales a referenciar (encadenamiento de firmas, I7), p. ej. ['#eDTE...-002']. */
   referencias: string[];
+  /**
+   * URI de la referencia principal (p. ej. `#dDTE...`). Sin este valor, el simulador firma con
+   * referencia vacía ("todo el documento") — válida solo mientras el nodo firmado siga siendo la
+   * raíz del documento. El perfil real necesita firmar `gDatosGeneralesDTE`/`gEvento` para luego
+   * envolverlos en `rDTE>DTE`, y la referencia vacía NO sobrevive ese re-anidado (URI="" se
+   * recalcula sobre "todo el documento" en el momento de validar, que ya no es el mismo una vez
+   * insertado en un padre); una referencia explícita por id sí, porque exclusive-C14N canonicaliza
+   * el subárbol referenciado sin importar sus ancestros — ver ADR en docs/DECISIONES.md.
+   */
+  uriNodoPrincipal?: string;
   firmante: FirmanteInfo;
   rolFirmante: string;
   callbackUrl: string;

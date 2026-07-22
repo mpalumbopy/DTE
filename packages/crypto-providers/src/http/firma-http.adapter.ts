@@ -16,6 +16,7 @@ export class FirmaHttpAdapter extends AdaptadorHttpBase implements FirmaProvider
       solicitudId: req.solicitudId,
       xmlCanonicoB64: req.xmlCanonico.toString('base64'),
       referenciasCsv: req.referencias.join(','),
+      uriNodoPrincipal: req.uriNodoPrincipal ?? '',
       firmante: req.firmante,
       rolFirmante: req.rolFirmante,
       callbackUrl: req.callbackUrl,

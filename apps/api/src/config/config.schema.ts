@@ -1,8 +1,19 @@
+import { dirname, join } from 'path';
 import { z } from 'zod';
 
 const boolFromString = z
   .union([z.boolean(), z.string()])
   .transform((v) => (typeof v === 'boolean' ? v : v.toLowerCase() === 'true'));
+
+/**
+ * Resuelto vía require.resolve (no una ruta relativa a `cwd`): `cwd` varía según quién arranque el
+ * proceso (turbo desde la raíz del monorepo, Jest desde `apps/api`, la imagen de producción), pero
+ * la resolución de módulos de Node siempre encuentra el paquete workspace correctamente.
+ */
+function rutaXsdPorDefecto(): string {
+  const pkgJson = require.resolve('@psdte/xml-engine/package.json');
+  return join(dirname(pkgJson), 'schema', 'pagare-dte.provisional.xsd');
+}
 
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -16,7 +27,7 @@ export const envSchema = z.object({
   PUBLIC_BASE_URL: z.string().url().default('http://localhost:3000'),
   ALLOW_SIMULATOR: boolFromString.default(true),
   PROCESS_ROLE: z.enum(['api', 'worker']).default('api'),
-  XSD_PATH: z.string().default('./packages/xml-engine/schema/pagare-dte.provisional.xsd'),
+  XSD_PATH: z.string().default(rutaXsdPorDefecto()),
   SEED_DEMO: boolFromString.default(false),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().default(''),
   SMTP_HOST: z.string().optional().default('localhost'),

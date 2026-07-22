@@ -23,6 +23,15 @@ export async function crearPersona(
   return rows[0].id;
 }
 
+export async function crearPersonaDireccion(client: Client, personaId: string, direccion = 'Av. de Prueba 123'): Promise<void> {
+  await client.query(
+    `INSERT INTO psdte.persona_direccion
+        (persona_id, direccion, ciudad_codigo, distrito_codigo, departamento_codigo, pais_codigo, principal)
+     VALUES ($1, $2, 1, 1, 0, 600, TRUE)`,
+    [personaId, direccion],
+  );
+}
+
 export interface DteFixture {
   dteId: string;
   idDte: string;

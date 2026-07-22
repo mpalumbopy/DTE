@@ -231,6 +231,59 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   chequeo de integraciones activas en `/readyz` quedan para F10/F13 respectivamente — no son parte del DoD
   de F5.
 
+## F6 — Emisión
+
+- **Fecha:** 2026-07-22
+- **Estado:** ✅ completa
+- **DoD ejecutado (docs/PLAN.md sección 13):** e2e borrador → solicitar firmas (deudor + codeudor) →
+  simulador firma → confirmar → estado EMITIDO, XML v1 con firmas de partes + sello PSDTE embebidas,
+  hash registrado; ID-DTE duplicado → `ERR-DTE-409`; confirmar sin firmas → `ERR-ESTADO-001`.
+- **Hecho:**
+  - `IdDteService` (`common/id-dte/`): genera `vDTE/dDTE/eDTE...` (sección 5.3) desde
+    `psdte.seq_dte` (migración 017) + `parametro_sistema['psdte.fecha_autorizacion']`.
+  - Entidades nuevas: `Dte`, `DteParte`, `DteLugarPago`, `DteCondicion`, `DteTenencia`,
+    `DteXmlVersion`, `Certificado`, `Firma`, `Evidencia`, `Notificacion`, `SolicitudFirma`, más
+    catálogos geográficos/documento (`CatPais/Departamento/Distrito/Ciudad/Moneda/TipoDocumentoIdentidad`
+    — ver ADR-020).
+  - `EmisionModule` (`modules/emision/`): `BorradorEmisionStore` (Redis, ver ADR-018) +
+    `EmisionService` con tres operaciones:
+    - `crearBorrador`: resuelve personas/direcciones/catálogos, arma `DatosGeneralesDteInput`, calcula
+      monto→letras, valida contra el builder de `@psdte/xml-engine` (placeholders resueltos), guarda
+      el borrador en Redis (24h TTL).
+    - `solicitarFirmas`: firma secuencialmente Deudor→CoDeudor (cada uno recibe el XML ya firmado por
+      el anterior — el mismo patrón que usaría un proveedor real), vía
+      `ProviderFactoryService.obtenerProveedorFirma()`; persiste `solicitud_firma` (con `dte_id=NULL`
+      hasta confirmar).
+    - `confirmar`: agrega el sello PSDTE, valida XSD + semántica + criptográficamente cada firma
+      embebida, y persiste todo (`dte`, `dte_parte`, `dte_lugar_pago`, `dte_condicion`, `dte_tenencia`,
+      `dte_xml_version` v1, `certificado`+`firma` por cada firma embebida, `evidencia`, `notificacion`,
+      backfill de `dte_id` en `solicitud_firma`) en una única transacción; registra auditoría
+      (`DTE_EMITIDO`) solo tras el commit exitoso.
+  - Seeds nuevos: `cat_tipo_evidencia`/`cat_tipo_notificacion` (no tenían filas desde F1 — ver
+    `06_evidencias_notificaciones.sql`).
+  - Test e2e nuevo (`test/emision/emision.e2e-spec.ts`, 3 casos, contra Postgres/Redis reales):
+    flujo feliz completo (verifica `dte`, `dte_xml_version`, 3 `firma` embebidas con
+    `estado_validacion=VALIDA`, `dte_tenencia` inicial), confirmar sin firmas → 409, ID-DTE duplicado
+    → 409. 27/27 e2e del monorepo en verde junto con F1-F5.
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo.
+- **Bugs/gaps reales encontrados y corregidos en el camino:**
+  - `XSD_PATH` con ruta relativa (`./packages/...`) rompía según `cwd` del proceso (funciona si se
+    arranca desde la raíz del monorepo, rompe bajo Jest). Corregido resolviendo el default vía
+    `require.resolve('@psdte/xml-engine/package.json')` en `config.schema.ts` — estable sin importar
+    quién arranque el proceso. Se quitó el override redundante de `.env`/`.env.test`.
+  - Bug real de firmas XAdES al re-anidar un nodo ya firmado con `URI=""` (ver ADR-019) — descubierto
+    con un script de reproducción aislado antes de comprometerse a una causa; corregido agregando
+    `uriNodoPrincipal` a `SolicitarFirmaRequest` (extensión retrocompatible de F5).
+  - `fn_aplicar_evento` no aplica a la emisión misma (exige que `dte` ya exista y `cat_tipo_evento` no
+    tiene código EMISION) — descubierto al diseñar `confirmar`; ver ADR-018 para el razonamiento
+    completo y por qué el borrador vive en Redis, no en Postgres.
+- **Decisiones registradas:** ADR-018 (borrador en Redis), ADR-019 (URI de firma explícita vs. vacía),
+  ADR-020 (catálogos geográficos/documento).
+- **Pendiente:** callback HMAC entrante (`POST .../firmas/callback`) no se implementó — el simulador
+  resuelve `solicitarFirma` de forma síncrona, así que no hay ronda asíncrona que necesite callback
+  todavía; se retoma cuando F10 conecte un proveedor HTTP real que sí sea asíncrono. Persona jurídica
+  y BLOQUEO siguen fuera de alcance (ver F4/ADR-014).
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -242,4 +295,6 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F6 (Emisión): en curso — siguiente fase autónoma a ejecutar.
+- F7 (Eventos: endoso, pago, bloqueo, cancelación, vencimiento): siguiente fase autónoma a ejecutar.
+  Recordar ADR-004 (ambigüedad de `fn_aplicar_evento` para PAGO parcial/total) al diseñar
+  `EventosService`.
