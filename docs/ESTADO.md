@@ -79,17 +79,53 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   - `pnpm build/lint/typecheck/test:cov` en verde.
 - **Decisiones registradas:** ADR-007 (columnas de familia de sesión, no están en el DDL de referencia),
   ADR-008 (bug de caché incremental de TypeScript entre `build` y `typecheck`, resuelto quitando
-  `incremental` del tsconfig base).
+  `incremental` del tsconfig base), ADR-009 (`.env.test` commiteado a propósito).
 - **Pendiente:** ninguno para F2. El chequeo de integraciones activas en `/readyz` y el candado
   `ALLOW_SIMULATOR` llegan con F5.
+
+## F3 — Catálogos, personas, parámetros
+
+- **Fecha:** 2026-07-22
+- **Estado:** ✅ completa
+- **DoD ejecutado:**
+  - `CatalogosModule`: `GET /catalogos/:codigo` (autenticado, cualquier rol) resuelve CAT-DTE-01..10 contra
+    sus tablas reales, cache de 5 min en memoria, header `X-Catalogos-Version`. Entidades TypeORM nuevas
+    para los catálogos que aún no las tenían (`cat_estado_dte`, `cat_tipo_evento`, `cat_transicion`,
+    `cat_acto_externo`, `cat_causal_bloqueo`, `cat_tipo_evidencia`, `cat_nivel_consulta`,
+    `cat_tipo_notificacion`, `cat_permiso`, `cat_rol_permiso`).
+  - `PersonasModule`: CRUD + búsqueda por documento (`GET /personas?documento=`), unicidad
+    `(tipo_documento, numero_documento, pais_documento)` mapeada a `ERR-PERSONA-409` ante violación;
+    restringido a `ADMIN_PSDTE`/`OPERADOR_EMISION`.
+  - `ParametrosModule`: `GET /parametros`, `PUT /parametros/:clave` (respeta `editable`, `ERR-PARAM-403`/
+    `ERR-PARAM-404`), solo `ADMIN_PSDTE`.
+  - Tipos compartidos generados desde los seeds: `db/seeds/generar-tipos-compartidos.ts` (nuevo script,
+    corre automáticamente al final de `pnpm db:seed`) vuelca `CAT_ESTADO_DTE`, `CAT_TIPO_EVENTO`,
+    `CAT_ROL_CODIGOS`, `CAT_ERROR_CODIGOS` y `CAT_PERMISO_CODIGOS` a
+    `packages/shared/src/generated/catalogos.generated.ts` (commiteado; se regenera con cada seed).
+  - Tests e2e reales (`apps/api/test/catalogos-personas/catalogos-personas.e2e-spec.ts`, 8 casos):
+    catálogos requieren auth, `GET /catalogos/CAT-DTE-03` responde la matriz sembrada (incluye el DoD
+    explícito de la fase), `CAT-DTE-01`, catálogo inexistente → `ERR-DTE-404`, alta/duplicado/búsqueda de
+    persona, rol sin permiso → 403, listar/actualizar parámetros y sus errores. 18/18 verde junto con F1/F2.
+  - `pnpm build/lint/typecheck/test:cov` en verde.
+- **Bugs reales encontrados y corregidos en el camino:**
+  - `ActualizarParametroDto.valor` sin ningún decorador de `class-validator` quedaba fuera del whitelist
+    global (`whitelist:true` + `forbidNonWhitelisted:true`) y toda actualización de parámetro devolvía 400.
+    Corregido con `@IsDefined()`.
+  - Condición de carrera real en `AuditoriaService` con `auditoria_log` vacía (ver ADR-010): el
+    `FOR UPDATE` sobre "la última fila" no sirve de nada si no hay ninguna fila. Corregido con
+    `pg_advisory_xact_lock`.
+- **Decisiones registradas:** ADR-010 (advisory lock en auditoría).
+- **Pendiente:** ninguno para F3.
 
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
-- XML firmado de referencia del pagaré: **pendiente**. F4 (xml-engine) queda bloqueada hasta recibirlo.
+- XML firmado de referencia del pagaré: **pendiente**. Un primer intento de subida (2026-07-22) resultó
+  ser un archivo no relacionado (un "Diploma Digital" del MEC de Brasil, namespace
+  `http://portal.mec.gov.br/diplomadigital/arquivos-em-xsd`) — se avisó al usuario y se descartó sin
+  usarlo. F4 (xml-engine) sigue bloqueada hasta recibir el XML correcto.
 
 ## Próximos pasos
 
-- F3 (Catálogos, personas, parámetros): no depende de insumos externos.
-- F4 (xml-engine): pendiente de recibir el XML de referencia firmado.
-- F5 (crypto-providers/simulador): no depende de insumos externos, puede adelantarse si conviene.
+- F4 (xml-engine): pendiente de recibir el XML de referencia firmado del pagaré.
+- F5 (crypto-providers/simulador): no depende de insumos externos, puede adelantarse mientras se espera.

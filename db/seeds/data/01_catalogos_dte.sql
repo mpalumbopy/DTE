@@ -70,5 +70,8 @@ INSERT INTO psdte.cat_error (codigo,http_status,mensaje,categoria) VALUES
  ('ERR-AUTH-003',403,'Código MFA inválido','AUTORIZACION'),
  ('ERR-AUTH-004',403,'MFA requerida y no verificada para este rol','AUTORIZACION'),
  ('ERR-AUTH-005',423,'Usuario bloqueado por intentos fallidos','AUTORIZACION'),
+ ('ERR-PERSONA-409',409,'Ya existe una persona con ese tipo y número de documento','VALIDACION_SEMANTICA'),
+ ('ERR-PARAM-404',404,'Parámetro inexistente','VALIDACION_SEMANTICA'),
+ ('ERR-PARAM-403',403,'El parámetro no es editable','AUTORIZACION'),
  ('ERR-PKI-503',503,'Servicio PCSC/TSL no disponible: degradación controlada','PKI')
 ON CONFLICT (codigo) DO NOTHING;

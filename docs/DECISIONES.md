@@ -154,3 +154,23 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   valores en `.env` de producción/staging.
 - **Alternativas descartadas:** generar `.env.test` en un paso de CI (más pasos, sin beneficio real ya que
   los valores no son secretos); usar GitHub Secrets (innecesario para claves que no protegen nada real).
+
+## ADR-010 — Condición de carrera real en el encadenado de `auditoria_log` con la tabla vacía (F3)
+
+- **Fecha:** 2026-07-22
+- **Fase:** F3 (detectado al agregar el e2e de catálogos/personas, que hizo correr 3 apps de prueba en
+  paralelo contra la misma base `psdte_test` recién reseteada)
+- **Contexto:** `AuditoriaService.registrar` (F2) serializaba las inserciones bloqueando
+  (`SELECT ... FOR UPDATE`) la última fila de `auditoria_log` antes de insertar la siguiente. Con la tabla
+  **vacía**, esa consulta no devuelve ninguna fila, así que no hay nada que bloquear: dos transacciones
+  concurrentes (dos instancias de la API arrancando a la vez, o en este caso dos procesos de test) pueden
+  ejecutar la primera inserción al mismo tiempo, ambas con `hash_anterior = NULL`, rompiendo la cadena
+  (invariante I5). El test `auditoria_log encadena hashes` lo detectó de forma intermitente
+  (`hash_anterior` esperado vs. `null` recibido).
+- **Decisión:** `AuditoriaService.registrar` ahora toma primero un advisory lock de transacción
+  (`SELECT pg_advisory_xact_lock($1)` con una clave fija) antes de leer la última fila e insertar. Este
+  lock sí serializa aunque la tabla esté vacía, y se libera automáticamente al terminar la transacción
+  (commit o rollback) — no requiere liberarlo a mano.
+- **Nota:** este mismo patrón (bloquear un recurso que puede no tener filas) habrá que tenerlo en cuenta si
+  alguna función futura necesita "encadenar" sobre una tabla que empieza vacía sin pasar por
+  `fn_aplicar_evento` (que sí es seguro porque siempre bloquea la fila de `dte`, que ya existe).

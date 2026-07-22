@@ -13,6 +13,9 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsuariosModule } from './modules/usuarios/usuarios.module';
 import { SaludModule } from './modules/salud/salud.module';
 import { AuditoriaModule } from './modules/auditoria/auditoria.module';
+import { CatalogosModule } from './modules/catalogos/catalogos.module';
+import { PersonasModule } from './modules/personas/personas.module';
+import { ParametrosModule } from './modules/parametros/parametros.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CatalogoErrorService } from './common/filters/catalogo-error.service';
 import { CatalogoErrorFilter } from './common/filters/catalogo-error.filter';
@@ -45,6 +48,9 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     AuthModule,
     UsuariosModule,
     SaludModule,
+    CatalogosModule,
+    PersonasModule,
+    ParametrosModule,
   ],
   controllers: [AppController],
   providers: [
