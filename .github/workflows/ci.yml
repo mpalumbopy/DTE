@@ -57,5 +57,14 @@ jobs:
       - name: Unit tests
         run: pnpm test:cov
 
+      - name: Crear base de datos de test
+        run: PGPASSWORD=psdte psql -h localhost -U psdte -d psdte -c 'CREATE DATABASE psdte_test;'
+
+      - name: Migraciones + seeds (test)
+        run: pnpm --filter @psdte/api db:reset:test
+
+      - name: Integración/E2E API
+        run: pnpm --filter @psdte/api test:e2e
+
       - name: pnpm audit (prod deps)
         run: pnpm audit --prod || echo "::warning::pnpm audit reportó hallazgos, revisar antes de release"

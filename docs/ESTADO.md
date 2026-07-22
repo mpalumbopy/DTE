@@ -17,11 +17,41 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   - Commit `feat(F0): scaffolding del monorepo`.
 - **Pendiente:** ninguno para F0. F1 (BD) y F4 (xml-engine) esperan los insumos de referencia (ver sección "Insumos de referencia").
 
+## F1 — Base de datos
+
+- **Fecha:** 2026-07-22
+- **Estado:** ✅ completa
+- **DoD ejecutado:**
+  - `db/modelo_datos_psdte.sql` (DDL de referencia, provisto por el usuario) convertido en 15 migraciones
+    ordenadas `db/migrations/001..015` (extensiones → catálogos → seguridad → personas → núcleo DTE →
+    tenencia → eventos → detalle de eventos → probatoria → operación → auditoría/incidencias →
+    `fn_aplicar_evento` → integraciones, sección 4.1 del plan), formato `-- Up/Down Migration` de
+    node-pg-migrate, todo bajo esquema `psdte` con objetos completamente calificados.
+  - Seeds idempotentes `db/seeds/data/01..05` (catálogos CAT-DTE-01..10, geografía mínima, roles/permisos
+    propios — ADR-003 —, `parametro_sistema`, `integracion_ws` en modo SIMULADOR por tipo) + `run-seeds.ts`
+    (paquete `@psdte/db-seeds`) que además siembra usuarios demo (`SEED_DEMO=true`) con password Argon2id
+    y secreto MFA cifrado con AES-256-GCM (`packages/shared/src/crypto/aes-gcm.ts`, nuevo, con tests).
+  - `pnpm db:reset` (dev) y `pnpm db:reset:test` (test) corren limpios de punta a punta.
+  - Tests de invariantes `apps/api/test/db/invariantes-f1.e2e-spec.ts` (Jest + `pg` directo, ver ADR-006):
+    doble tenencia vigente rechazada (I2), UPDATE/DELETE sobre `dte_evento` rechazado (I4), transición no
+    seedeada → `ERR-ESTADO-001`, `fn_aplicar_evento` camino feliz con encadenamiento de hashes (I5) y
+    actualización del estado vigente — 4/4 verde.
+  - CI actualizado: crea `psdte_test`, corre `db:reset:test` y `test:e2e`.
+  - `pnpm build/lint/typecheck/test:cov` siguen en verde con los 2 paquetes nuevos (`@psdte/db-seeds`,
+    más `packages/shared/src/crypto`).
+- **Decisiones registradas:** ADR-003 (roles/permisos y geografía propios), ADR-004 (ambigüedad de
+  `fn_aplicar_evento` en transiciones de PAGO — acción pendiente en F7), ADR-005 (escenario demo completo
+  diferido a F7), ADR-006 (tests de integración sin Testcontainers).
+- **Pendiente:** el escenario demo completo (1 DTE emitido+endosado+pagado/cancelado) queda para el cierre
+  de F7 (ADR-005). El XML de referencia firmado sigue sin recibirse: F4 continúa bloqueada.
+
 ## Insumos de referencia
 
-- `db/modelo_datos_psdte.sql` (DDL de referencia) y el XML firmado de referencia del pagaré **no estaban incluidos** en el material provisto junto al plan. El usuario indicó que los subiría antes de F1/F4. Hasta que lleguen, F1 y F4 quedan bloqueados; el resto de las fases de F0 (scaffolding) no dependen de ellos y se ejecutan igual.
+- `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
+- XML firmado de referencia del pagaré: **pendiente**. F4 (xml-engine) queda bloqueada hasta recibirlo.
 
 ## Próximos pasos
 
-- F1 (Base de datos): pendiente de recibir `db/modelo_datos_psdte.sql`.
+- F2 (Config, salud, auth y usuarios): no depende de insumos externos, puede arrancar ya.
 - F4 (xml-engine): pendiente de recibir el XML de referencia firmado.
+- F5 (crypto-providers/simulador): no depende de insumos externos, puede adelantarse si conviene.

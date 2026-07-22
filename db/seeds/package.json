@@ -1,0 +1,26 @@
+{
+  "name": "@psdte/db-seeds",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "seed": "ts-node -P tsconfig.json run-seeds.ts",
+    "seed:test": "ENV_FILE=../../.env.test ts-node -P tsconfig.json run-seeds.ts",
+    "lint": "eslint \"*.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'sin tests unitarios propios (ver apps/api/test)' && exit 0",
+    "test:cov": "pnpm test",
+    "build": "echo 'sin build (script ts-node)' && exit 0"
+  },
+  "dependencies": {
+    "@psdte/shared": "workspace:*",
+    "argon2": "^0.41.1",
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}
