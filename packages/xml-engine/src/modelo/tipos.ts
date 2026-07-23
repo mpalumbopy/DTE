@@ -128,6 +128,36 @@ export interface EventoCancelacionInput {
   motivo: string;
 }
 
-// EventoBloqueo queda fuera de este modelo: no está demostrado en el XML de referencia y es
-// alcance de F7 (docs/PLAN.md sección 13) — se modela ahí, informado por lo que exija esa fase.
-export type EventoInput = EventoEndosoInput | EventoPagoInput | EventoCancelacionInput;
+/**
+ * BLOQUEO y LEVANTAMIENTO_BLOQUEO no están demostrados en el XML de referencia (ver ADR-014): la
+ * forma de estos dos `gEvento` es inferida a partir de `dte_bloqueo` (db/modelo_datos_psdte.sql) y
+ * documentada como "punto a confirmar" en `schema/pagare-dte.provisional.xsd`, no adivinada en
+ * silencio.
+ */
+export interface EventoBloqueoInput {
+  tipo: 'BLOQUEO';
+  idEvento: string;
+  numeroEvento: string;
+  fechaEvento: Date;
+  /** Código de cat_causal_bloqueo. */
+  codigoCausalBloqueo: number;
+  causalBloqueo: string;
+  autoridad: string;
+  numeroOficio?: string;
+  fechaOrden: Date;
+}
+
+export interface EventoLevantamientoBloqueoInput {
+  tipo: 'LEVANTAMIENTO_BLOQUEO';
+  idEvento: string;
+  numeroEvento: string;
+  fechaEvento: Date;
+  motivo: string;
+}
+
+export type EventoInput =
+  | EventoEndosoInput
+  | EventoPagoInput
+  | EventoCancelacionInput
+  | EventoBloqueoInput
+  | EventoLevantamientoBloqueoInput;

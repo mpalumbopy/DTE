@@ -426,3 +426,87 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
 - **Decisión:** se agregaron entidades mínimas (solo columnas, sin relaciones TypeORM) para estas 6
   tablas, usadas por `EmisionService` para resolver nombre desde código antes de llamar al builder de
   `@psdte/xml-engine`. No se expone un endpoint nuevo para ellas (no lo pidió ninguna fase todavía).
+
+## ADR-021 — F7 (eventos): firmar el documento completo, no el fragmento aislado del evento
+
+- **Fecha:** 2026-07-23
+- **Fase:** F7
+- **Contexto:** al implementar `EndosoService`/`PagoService`/`BloqueoService`, la primera versión firmaba
+  cada `gEvento` de forma aislada (`canonicalizarExclusivo(nodoEvento)` como único contenido enviado al
+  proveedor de firma), igual que F6 firma `gDatosGeneralesDTE` en solitario. Esto rompe el encadenamiento
+  I7: cada evento firma una referencia adicional a `#${idEventoAnterior}` (el evento previo, o
+  `gDatosGeneralesDTE` si es el primero), pero ese nodo referenciado no existe dentro de un documento que
+  contiene *solo* el fragmento nuevo — `xadesjs` lanza `XMLJS0013: Cannot get object by reference` al
+  calcular el digest de esa referencia. A diferencia de `gDatosGeneralesDTE` (F6), que no referencia nada
+  fuera de sí mismo, todo evento de F7 sí necesita ver un nodo hermano.
+- **Decisión:** los servicios de evento ahora envían el **documento completo** (`serializar(documentoActual)`,
+  ya con el nuevo `gEvento` sin firmar anexado) al proveedor de firma, no un fragmento aislado — igual que
+  hace `builder/firma-integracion.spec.ts` (F4) al firmar sobre el mismo objeto `Document` en memoria. Esto
+  exige que `FirmaSimulador` deje de anidar cada `ds:Signature` como hijo de `documento.documentElement` a
+  ciegas: ahora localiza el elemento cuyo `Id`/`id`/`ID` coincide con `uriNodoPrincipal` (nueva función
+  `buscarElementoPorId` en `@psdte/xml-engine`) y ahí anida la firma — si `uriNodoPrincipal` es `''`
+  (vacío), sigue usando la raíz del documento sin cambios (preserva el sello final de `CancelacionService`,
+  hermano de `<DTE>` bajo `<rDTE>`, ver ADR-014). Con este cambio, el resultado de cada firma (`xadesXml`)
+  ya es el documento completo actualizado — se eliminó el patrón previo de "extraer nodo, firmar aislado,
+  reimportar con `importNode`/`replaceChild`" en `EndosoService`/`PagoService`/`BloqueoService`: ahora
+  simplemente se re-parsea el XML devuelto (`Parse(resultado.xadesXml)`) y se ubica el `gEvento` firmado
+  con `buscarElementoPorId` para validar/hashear. Sin cambios en F5/F6 (ambos siguen firmando documentos de
+  una sola pieza donde `uriNodoPrincipal` coincide con la raíz).
+- **Alternativas descartadas:** mantener el fragmento aislado y "clonar" el nodo referenciado dentro de él
+  solo para que la validación de digest tenga algo que resolver — se descarta porque el hash resultante
+  dependería de un clon, no del nodo real ya persistido, rompiendo I5 (trazabilidad por hash real).
+
+## ADR-022 — `fn_aplicar_evento`: `CREATE OR REPLACE` con más parámetros crea un overload, no reemplaza
+
+- **Fecha:** 2026-07-23
+- **Fase:** F7
+- **Contexto:** la migración 018 (`p_estado_destino` opcional, ver ADR-004) usaba `CREATE OR REPLACE
+  FUNCTION` para pasar de 10 a 11 parámetros. PostgreSQL identifica funciones por `(nombre, tipos de
+  parámetros)`: al cambiar la aridad, `CREATE OR REPLACE` no reemplaza la función existente, crea un
+  **overload** nuevo y deja el de 10 parámetros vivo. Al llamar desde `EventosService` con los 11
+  argumentos (el último `NULL` sin *cast* explícito), Postgres no podía resolver cuál overload usar
+  (`function psdte.fn_aplicar_evento(unknown, unknown, ...) does not exist`) porque `pg` envía los
+  parámetros sin tipo explícito y la resolución de sobrecarga con `unknown` + cantidad ambigua falla.
+- **Decisión:** se agregó `DROP FUNCTION IF EXISTS psdte.fn_aplicar_evento(<firma de 10 parámetros>)` al
+  inicio de la sección "Up Migration" de la migración 018 (antes de crear la versión de 11), y el `DROP`
+  simétrico de la versión de 11 al inicio de "Down Migration" — así nunca coexisten dos overloads tras un
+  ciclo up/down/up.
+- **Alternativas descartadas:** castear explícitamente los parámetros en cada llamada SQL (`$11::smallint`)
+  para forzar la resolución del overload de 11 — no soluciona el problema de fondo (dos funciones vivas con
+  el mismo nombre, una de ellas obsoleta y potencialmente invocable por error desde otro lugar).
+
+## ADR-023 — Cierre de F7: pago, bloqueo/levantamiento, cancelación y roles de evento
+
+- **Fecha:** 2026-07-23
+- **Fase:** F7
+- **Contexto:** con ENDOSO ya resuelto (ADR-019/021), F7 requería PAGO (parcial/total vía
+  `p_estado_destino` calculado desde el saldo), BLOQUEO/LEVANTAMIENTO_BLOQUEO (forma inferida, ver
+  ADR-014) y CANCELACION (sello final sobre todo el documento, sin firma propia en su `gEvento` — también
+  ADR-014).
+- **Decisión:**
+  - `PagoService`: valida `monto ≤ saldo`, calcula `saldoNuevo` y resuelve `estadoDestino` (4=PAGADO_PARCIAL
+    si `saldoNuevo > 0`, 5=PAGADO_TOTAL si `saldoNuevo = 0`) explícitamente, igual que endoso firma solo
+    el sello PSDTE (PAGO no exige firma de parte, `cat_tipo_evento.requiere_firma_endosante/endosatario =
+    FALSE` por defecto).
+  - `BloqueoService.registrarBloqueo`: sin verificación de tenencia (una orden de autoridad no depende de
+    quién sea el tenedor actual) — solo el rol `AUTORIDAD` a nivel de endpoint. `levantarBloqueo` calcula
+    `estadoDestino` leyendo `dte_evento.estado_previo` del evento de bloqueo original (no un valor fijo):
+    se amplió el seed de `cat_transicion` para `LEVANTAMIENTO_BLOQUEO` (origen=7) con una fila por cada
+    posible `estado_previo` (1,2,3,4,6,9 — los mismos orígenes que puede tener BLOQUEO), cada una con un
+    `condicion` distinto (la restricción `UNIQUE(estado_origen, tipo_evento, condicion)` exige texto
+    único), en vez del único registro hardcodeado a `estado_destino=2` que dejaba el seed original.
+  - `CancelacionService`: sin firma dentro del `gEvento` de CANCELACION; en su lugar, un sello PSDTE final
+    con `uriNodoPrincipal: ''` sobre el documento completo (ver ADR-014/021) — `ambito: 'DOCUMENTO'` en la
+    fila de `firma` persistida (valor ya soportado por el enum `AmbitoFirma`, sin usar hasta ahora).
+  - Se extrajo `EventosComunesService` (resolución de documento de identidad, datos del PSDTE, y el
+    mapeo `usuario → persona` para la verificación de tenencia) para no triplicar esa lógica entre
+    Endoso/Pago/Bloqueo/Cancelación — `EndosoService` se refactorizó para usarlo también.
+  - Los roles de login (`TENEDOR`/`DEUDOR`) son un filtro de **acceso al endpoint**, no de autorización
+    final: un `DEUDOR` puede terminar siendo el tenedor vigente tras un endoso, así que `endosos`,
+    `pagos` y `cancelacion` aceptan ambos roles — la autorización real (¿es esta persona el tenedor
+    vigente de *este* DTE?) la hace el servicio contra `dte_tenencia`, devolviendo `ERR-CTRL-001` si no
+    coincide (I2).
+- **Alternativas descartadas:** modelar el "levantamiento restaura estado previo" con una única transición
+  fija en `cat_transicion` (como venía el seed) — se descarta porque un DTE puede bloquearse desde
+  distintos estados (EMITIDO, ENDOSADO, PRESENTADO_AL_COBRO, etc.) y el levantamiento debe volver
+  exactamente a ESE estado, no siempre a ENDOSADO.

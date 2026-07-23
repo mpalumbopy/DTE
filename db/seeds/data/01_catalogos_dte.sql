@@ -39,7 +39,12 @@ INSERT INTO psdte.cat_transicion (estado_origen,tipo_evento,estado_destino,condi
  (3,6,6,NULL), (9,6,6,NULL),
  (5,1,8,NULL),
  (1,2,7,NULL), (2,2,7,NULL), (3,2,7,NULL), (4,2,7,NULL), (6,2,7,NULL), (9,2,7,NULL),
- (7,7,2,'restaurar estado previo')
+ (7,7,1,'restaurar estado previo -> EMITIDO'),
+ (7,7,2,'restaurar estado previo -> ENDOSADO'),
+ (7,7,3,'restaurar estado previo -> PRESENTADO_AL_COBRO'),
+ (7,7,4,'restaurar estado previo -> PAGADO_PARCIAL'),
+ (7,7,6,'restaurar estado previo -> PROTESTADO'),
+ (7,7,9,'restaurar estado previo -> VENCIDO')
 ON CONFLICT (estado_origen, tipo_evento, condicion) DO NOTHING;
 
 INSERT INTO psdte.cat_nivel_consulta (codigo,nombre,campos_visibles,descripcion) VALUES

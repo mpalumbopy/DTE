@@ -52,6 +52,11 @@ export class IdDteService {
     return `eDTE${sufijo}-${String(numeroEvento).padStart(3, '0')}`;
   }
 
+  /** Extrae el sufijo compartido (vDTE/dDTE/eDTE) desde un id_dte existente (p. ej. para F7). */
+  sufijoDesdeIdDte(idDte: string): string {
+    return idDte.replace(/^vDTE/, '');
+  }
+
   private async siguienteSecuencial(): Promise<number> {
     const filas: Array<{ nextval: string }> = await this.dataSource.query("SELECT nextval('psdte.seq_dte') AS nextval");
     return Number(filas[0].nextval);

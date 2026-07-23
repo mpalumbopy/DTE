@@ -9,6 +9,8 @@ import {
   EventoEndosoInput,
   EventoPagoInput,
   EventoCancelacionInput,
+  EventoBloqueoInput,
+  EventoLevantamientoBloqueoInput,
 } from '../modelo/tipos';
 
 const DIRECCION: DireccionInput = {
@@ -164,5 +166,40 @@ describe('builder (perfil pagaré-DTE)', () => {
     expect(xml).toContain('<tipoEvento>CANCELACION DEL DTE</tipoEvento>');
     expect(xml).toContain('Páguese a la orden de Juan Perez');
     expect(xml).toContain('Páguese a la orden de Thiago Soto');
+  });
+
+  it('agrega un bloqueo y su levantamiento (forma inferida, no observada en el XML de referencia)', () => {
+    const input = datosGeneralesDePrueba();
+    const montoLetras = montoALetras(input.monto);
+    const { documento } = construirDatosGeneralesDte(input, montoLetras);
+
+    const bloqueo: EventoBloqueoInput = {
+      tipo: 'BLOQUEO',
+      idEvento: 'eDTE2025070920251021000000099-001',
+      numeroEvento: '001',
+      fechaEvento: new Date('2026-03-01T00:00:00Z'),
+      codigoCausalBloqueo: 1,
+      causalBloqueo: 'ORDEN_JUDICIAL',
+      autoridad: 'Juzgado de Paraguay',
+      numeroOficio: 'OF-123/2026',
+      fechaOrden: new Date('2026-02-28T00:00:00Z'),
+    };
+    agregarEvento(documento, input.idDte, bloqueo);
+
+    const levantamiento: EventoLevantamientoBloqueoInput = {
+      tipo: 'LEVANTAMIENTO_BLOQUEO',
+      idEvento: 'eDTE2025070920251021000000099-002',
+      numeroEvento: '002',
+      fechaEvento: new Date('2026-04-01T00:00:00Z'),
+      motivo: 'Orden judicial de levantamiento',
+    };
+    agregarEvento(documento, input.idDte, levantamiento);
+
+    const xml = serializar(documento);
+    expect(xml).toContain('<tipoEvento>BLOQUEO</tipoEvento>');
+    expect(xml).toContain('<codigoCausalBloqueo>1</codigoCausalBloqueo>');
+    expect(xml).toContain('<autoridad>Juzgado de Paraguay</autoridad>');
+    expect(xml).toContain('<tipoEvento>LEVANTAMIENTO_BLOQUEO</tipoEvento>');
+    expect(xml).toContain('Orden judicial de levantamiento');
   });
 });

@@ -284,6 +284,49 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   todavía; se retoma cuando F10 conecte un proveedor HTTP real que sí sea asíncrono. Persona jurídica
   y BLOQUEO siguen fuera de alcance (ver F4/ADR-014).
 
+## F7 — Eventos: endoso, pago, bloqueo, cancelación
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa (vencimiento por cron queda pendiente — ver "Pendiente")
+- **DoD ejecutado (docs/PLAN.md sección 13):** e2e ciclo 2 endosos + pago total + cancelación con cadena
+  de hashes de eventos verificable; carrera de 20 endosos concurrentes → exactamente 1 prospera, 19
+  `ERR-CTRL-001`; bloqueo detiene endoso (`ERR-ESTADO-003`) y el levantamiento restaura el estado previo
+  (no uno fijo). Todo contra Postgres/Redis reales, sin mocks del motor de firma (simulador real).
+- **Hecho:**
+  - Migración 018 (`p_estado_destino` opcional en `fn_aplicar_evento`, ver ADR-004/022) — corregida para
+    no dejar dos overloads vivos tras un ciclo up/down (ADR-022).
+  - Seed de `cat_transicion` para LEVANTAMIENTO_BLOQUEO ampliado: una fila por cada estado previo posible
+    (no un destino fijo — ver ADR-023).
+  - Entidades nuevas: `DteEvento`, `DteEndoso`, `DtePago`, `DteBloqueo`, `DteCancelacion`.
+  - `EventosService` (única puerta a `fn_aplicar_evento`, I3) + `EventosComunesService` (documento de
+    identidad, datos del PSDTE, mapeo usuario→persona — compartido entre los 4 servicios de evento).
+  - `EndosoService`, `PagoService`, `BloqueoService` (registrar + levantar), `CancelacionService` —
+    firman el documento completo (no el `gEvento` aislado, ver ADR-021), rotan `dte_tenencia` (solo
+    endoso), calculan `estadoDestino` explícito cuando `cat_transicion` es ambiguo (pago, levantamiento).
+  - `EventosController`/`EventosModule`: `POST /dte/:id/endosos`, `POST /dte/:id/pagos`,
+    `POST /dte/:id/bloqueos`, `DELETE /dte/:id/bloqueos/:bid`, `POST /dte/:id/cancelacion` — roles de
+    login como filtro de acceso, autorización real vía `dte_tenencia` en el servicio (ver ADR-023).
+  - Test e2e nuevo (`test/eventos/eventos.e2e-spec.ts`, 3 casos): ciclo completo, carrera de 20
+    concurrentes, bloqueo/levantamiento. 33/33 e2e del monorepo en verde junto con F1-F6.
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo (`xml-engine`, `crypto-providers`, `api`).
+- **Bugs/gaps reales encontrados y corregidos en el camino:**
+  - Firmar el `gEvento` aislado (en vez del documento completo) rompía toda referencia I7 al evento/nodo
+    anterior (`XMLJS0013: Cannot get object by reference`) — no solo en el primer evento, en todos. Ver
+    ADR-021 para el fix (documento completo + `buscarElementoPorId` para anidar cada firma en el nodo
+    correcto en vez de asumir la raíz).
+  - `fn_aplicar_evento` de 11 parámetros (migración 018) coexistía con el de 10 tras un ciclo up/down,
+    causando error de resolución de sobrecarga en Postgres — ver ADR-022.
+  - Roles de login mal acoplados a "ser el tenedor vigente": un `DEUDOR` puede terminar siendo tenedor
+    tras un endoso, así que el filtro de rol del endpoint no puede excluirlo — corregido permitiendo
+    ambos roles en el controller, dejando la autorización real al chequeo de `dte_tenencia` (ERR-CTRL-001).
+- **Decisiones registradas:** ADR-021 (firmar documento completo), ADR-022 (overload de
+  `fn_aplicar_evento`), ADR-023 (cierre F7: pago/bloqueo/levantamiento/cancelación/roles).
+- **Pendiente:** el job de vencimiento (cron 15 min, aplica evento VENCIDO vía `fn_aplicar_evento` cuando
+  `now() > fecha_vencimiento` y saldo > 0) no se implementó — no hay infraestructura de jobs/BullMQ
+  todavía en el monorepo; se retoma cuando esa infraestructura exista (probablemente F13 o antes si otra
+  fase la requiere primero). Callback HMAC asíncrono del proveedor de firma sigue pendiente (mismo motivo
+  que F6).
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -295,6 +338,7 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F7 (Eventos: endoso, pago, bloqueo, cancelación, vencimiento): siguiente fase autónoma a ejecutar.
-  Recordar ADR-004 (ambigüedad de `fn_aplicar_evento` para PAGO parcial/total) al diseñar
-  `EventosService`.
+- F8 (Verificación): siguiente fase autónoma a ejecutar — `GET /dte/:id/verificacion` y
+  `GET /verificacion?codigo=…` (pública, sin datos personales) por nivel de acceso (sección 5.2/CAT-DTE-04).
+- Job de vencimiento (cron, evento VENCIDO) queda pendiente hasta que exista infraestructura de jobs —
+  ver "Pendiente" en F7.

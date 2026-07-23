@@ -1,4 +1,3 @@
-import { createHash, X509Certificate } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -24,6 +23,7 @@ import {
   validarSemantica,
 } from '@psdte/xml-engine';
 import { AuditoriaService } from '../auditoria/auditoria.service';
+import { extraerDetalleFirma } from '../eventos/firma-xml.util';
 import { IdDteService } from '../../common/id-dte/id-dte.service';
 import { ProviderFactoryService } from '../integraciones/provider-factory.service';
 import { Persona } from '../../entities/persona.entity';
@@ -52,50 +52,9 @@ import { CrearEmisionDto } from './dto/crear-emision.dto';
 import { DireccionDto } from './dto/direccion.dto';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
-const XADES_NS = 'http://uri.etsi.org/01903/v1.3.2#';
-const XADES_SIGNED_PROPS_TYPE = 'http://uri.etsi.org/01903#SignedProperties';
 const CODIGO_ESTADO_EMITIDO = 1;
 const CODIGO_EVIDENCIA_XML_FIRMADO = 1;
 const CODIGO_NOTIFICACION_EMISION_CONFIRMADA = 1;
-
-interface DetalleFirmaXml {
-  xmlSignatureId: string;
-  algoritmoFirma: string;
-  algoritmoDigest: string;
-  signingTime: Date;
-  referencias: string[];
-  signatureValueHash: string;
-  certificadoDer: Buffer;
-  selloTiempoTsa: string | null;
-}
-
-function extraerDetalleFirma(elementoFirma: Element): DetalleFirmaXml {
-  const signatureMethod = elementoFirma.getElementsByTagNameNS(DS_NS, 'SignatureMethod')[0] as Element | undefined;
-  const digestMethod = elementoFirma.getElementsByTagNameNS(DS_NS, 'DigestMethod')[0] as Element | undefined;
-  const signingTimeEl = elementoFirma.getElementsByTagNameNS(XADES_NS, 'SigningTime')[0] as Element | undefined;
-  const x509CertEl = elementoFirma.getElementsByTagNameNS(DS_NS, 'X509Certificate')[0] as Element | undefined;
-  const signatureValueEl = elementoFirma.getElementsByTagNameNS(DS_NS, 'SignatureValue')[0] as Element | undefined;
-  const tsaEl = elementoFirma.getElementsByTagNameNS(XADES_NS, 'EncapsulatedTimeStamp')[0] as Element | undefined;
-
-  const referenciasEls = Array.from(elementoFirma.getElementsByTagNameNS(DS_NS, 'Reference')) as Element[];
-  const referencias = referenciasEls
-    .filter((r) => r.getAttribute('Type') !== XADES_SIGNED_PROPS_TYPE)
-    .map((r) => r.getAttribute('URI') ?? '')
-    .filter((uri) => !uri.startsWith('#keyInfo-'));
-
-  const signatureValueBytes = Buffer.from(signatureValueEl?.textContent?.trim() ?? '', 'base64');
-
-  return {
-    xmlSignatureId: elementoFirma.getAttribute('Id') ?? '',
-    algoritmoFirma: signatureMethod?.getAttribute('Algorithm') ?? '',
-    algoritmoDigest: digestMethod?.getAttribute('Algorithm') ?? '',
-    signingTime: signingTimeEl?.textContent ? new Date(signingTimeEl.textContent) : new Date(),
-    referencias,
-    signatureValueHash: createHash('sha256').update(signatureValueBytes).digest('hex'),
-    certificadoDer: Buffer.from(x509CertEl?.textContent?.trim() ?? '', 'base64'),
-    selloTiempoTsa: tsaEl?.textContent?.trim() ?? null,
-  };
-}
 
 @Injectable()
 export class EmisionService {
@@ -437,16 +396,15 @@ export class EmisionService {
       const personaIdPorFirma = [...estado.firmasPartes.map((f) => f.personaId), null];
       for (let i = 0; i < nodosFirma.length; i += 1) {
         const detalle = extraerDetalleFirma(nodosFirma[i]);
-        const x509 = new X509Certificate(detalle.certificadoDer);
         const certificado = await certificadoRepo.save(
           certificadoRepo.create({
-            numeroSerie: x509.serialNumber,
-            subjectDn: x509.subject,
-            issuerDn: x509.issuer,
+            numeroSerie: detalle.x509.serialNumber,
+            subjectDn: detalle.x509.subject,
+            issuerDn: detalle.x509.issuer,
             tipo: rolesPorFirma[i] === 'PSDTE' ? 'SELLO_PSDTE' : 'FIRMA_CUALIFICADA',
             personaId: personaIdPorFirma[i],
-            validoDesde: new Date(x509.validFrom),
-            validoHasta: new Date(x509.validTo),
+            validoDesde: new Date(detalle.x509.validFrom),
+            validoHasta: new Date(detalle.x509.validTo),
             certificadoDer: detalle.certificadoDer,
             enTsl: true,
           }),

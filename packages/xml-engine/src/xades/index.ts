@@ -13,6 +13,21 @@ export function serializar(nodo: Node): string {
   return new XMLSerializer().serializeToString(nodo);
 }
 
+/** Busca un elemento por su atributo de identificador (`Id`/`id`/`ID`, según el nodo — el perfil
+ * pagaré-DTE no es consistente: `DTE`/`gDatosGeneralesDTE` usan `id`, `gEventos`/`gEvento` usan
+ * `ID`). Usado para anidar cada firma dentro del nodo que referencia `uriNodoPrincipal`, en vez de
+ * asumir que ese nodo es siempre la raíz del documento. */
+export function buscarElementoPorId(documento: Document, id: string): Element | undefined {
+  const todos = documento.getElementsByTagName('*');
+  for (let i = 0; i < todos.length; i += 1) {
+    const nodo = todos[i] as unknown as Element;
+    if (nodo.getAttribute('Id') === id || nodo.getAttribute('id') === id || nodo.getAttribute('ID') === id) {
+      return nodo;
+    }
+  }
+  return undefined;
+}
+
 /** Referencia adicional por URI (p. ej. al evento anterior, para el encadenamiento de firmas de I7). */
 export interface ReferenciaAdicional {
   uri: string;

@@ -92,6 +92,18 @@ export interface EventoCancelacionExtraido extends EventoExtraidoBase {
   motivo?: string;
 }
 
+export interface EventoBloqueoExtraido extends EventoExtraidoBase {
+  clase: 'BLOQUEO';
+  autoridad?: string;
+  numeroOficio?: string;
+  fechaOrden?: string;
+}
+
+export interface EventoLevantamientoBloqueoExtraido extends EventoExtraidoBase {
+  clase: 'LEVANTAMIENTO_BLOQUEO';
+  motivo?: string;
+}
+
 export interface EventoDesconocidoExtraido extends EventoExtraidoBase {
   clase: 'DESCONOCIDO';
 }
@@ -100,6 +112,8 @@ export type EventoExtraido =
   | EventoEndosoExtraido
   | EventoPagoExtraido
   | EventoCancelacionExtraido
+  | EventoBloqueoExtraido
+  | EventoLevantamientoBloqueoExtraido
   | EventoDesconocidoExtraido;
 
 export interface FirmaExtraida {
@@ -232,6 +246,8 @@ function extraerDatosGenerales(gDatosGenerales: Element | null, avisos: AvisoPar
 const CODIGO_TIPO_EVENTO_ENDOSO = '3';
 const CODIGO_TIPO_EVENTO_PAGO = '4';
 const CODIGO_TIPO_EVENTO_CANCELACION = '1';
+const CODIGO_TIPO_EVENTO_BLOQUEO = '2';
+const CODIGO_TIPO_EVENTO_LEVANTAMIENTO_BLOQUEO = '7';
 
 function extraerEvento(el: Element, posicion: number, avisos: AvisoParser[]): EventoExtraido {
   const idEvento = el.getAttribute('ID');
@@ -291,9 +307,23 @@ function extraerEvento(el: Element, posicion: number, avisos: AvisoParser[]): Ev
     return { ...base, clase: 'CANCELACION', motivo: texto(el, 'motivo') };
   }
 
+  if (codigoTipoEvento === CODIGO_TIPO_EVENTO_BLOQUEO) {
+    return {
+      ...base,
+      clase: 'BLOQUEO',
+      autoridad: texto(el, 'autoridad'),
+      numeroOficio: texto(el, 'numeroOficio'),
+      fechaOrden: texto(el, 'fechaOrden'),
+    };
+  }
+
+  if (codigoTipoEvento === CODIGO_TIPO_EVENTO_LEVANTAMIENTO_BLOQUEO) {
+    return { ...base, clase: 'LEVANTAMIENTO_BLOQUEO', motivo: texto(el, 'motivo') };
+  }
+
   avisos.push({
     codigo: 'TIPO_EVENTO_DESCONOCIDO',
-    mensaje: `codigoTipoEvento="${codigoTipoEvento}" no reconocido (esperado 1/3/4 — ver CAT_TIPO_EVENTO).`,
+    mensaje: `codigoTipoEvento="${codigoTipoEvento}" no reconocido (esperado 1/2/3/4/7 — ver CAT_TIPO_EVENTO).`,
     contexto: idEvento ?? undefined,
   });
   return { ...base, clase: 'DESCONOCIDO' };

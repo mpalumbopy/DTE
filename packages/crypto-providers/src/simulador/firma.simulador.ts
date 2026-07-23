@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { webcrypto } from 'crypto';
 import {
+  buscarElementoPorId,
   completarConSelloTiempo,
   firmarNodoXadesBes,
   Parse,
@@ -61,7 +62,9 @@ export class FirmaSimulador implements FirmaProviderPort {
 
     const hashFirma = createHash('sha256').update(pendiente.valorFirma).digest();
     const { tokenTsrDer } = await this.tsaProvider.sellarHash(hashFirma);
-    completarConSelloTiempo(documento, pendiente, tokenTsrDer);
+    const uriPrincipal = req.uriNodoPrincipal ?? '';
+    const nodoDestino = uriPrincipal ? buscarElementoPorId(documento, uriPrincipal.replace(/^#/, '')) : undefined;
+    completarConSelloTiempo(documento, pendiente, tokenTsrDer, nodoDestino);
 
     const xadesXml = serializar(documento);
     this.solicitudes.set(req.solicitudId, { estado: 'FIRMADA', xadesXml });

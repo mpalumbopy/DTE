@@ -35,3 +35,8 @@ export * from './cat-distrito.entity';
 export * from './cat-ciudad.entity';
 export * from './cat-moneda.entity';
 export * from './cat-tipo-documento-identidad.entity';
+export * from './dte-evento.entity';
+export * from './dte-endoso.entity';
+export * from './dte-pago.entity';
+export * from './dte-cancelacion.entity';
+export * from './dte-bloqueo.entity';

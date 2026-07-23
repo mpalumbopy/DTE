@@ -7,8 +7,10 @@ import {
   DireccionInput,
   DocumentoIdentidadInput,
   EndosatarioInput,
+  EventoBloqueoInput,
   EventoEndosoInput,
   EventoInput,
+  EventoLevantamientoBloqueoInput,
   EventoPagoInput,
   EventoCancelacionInput,
 } from '../modelo/tipos';
@@ -392,6 +394,31 @@ function construirNodoCancelacion(e: EventoCancelacionInput): string {
   );
 }
 
+/** Forma inferida (no observada en el XML de referencia) a partir de dte_bloqueo — ver ADR F7. */
+function construirNodoBloqueo(e: EventoBloqueoInput): string {
+  return (
+    campo('numeroEvento', e.numeroEvento) +
+    campo('fechaEvento', formatearFechaDte(e.fechaEvento)) +
+    campo('codigoTipoEvento', 2) +
+    campo('tipoEvento', 'BLOQUEO') +
+    campo('codigoCausalBloqueo', e.codigoCausalBloqueo) +
+    campo('causalBloqueo', e.causalBloqueo) +
+    campo('autoridad', e.autoridad) +
+    campoOpcional('numeroOficio', e.numeroOficio) +
+    campo('fechaOrden', formatearFechaDte(e.fechaOrden))
+  );
+}
+
+function construirNodoLevantamientoBloqueo(e: EventoLevantamientoBloqueoInput): string {
+  return (
+    campo('numeroEvento', e.numeroEvento) +
+    campo('fechaEvento', formatearFechaDte(e.fechaEvento)) +
+    campo('codigoTipoEvento', 7) +
+    campo('tipoEvento', 'LEVANTAMIENTO_BLOQUEO') +
+    campo('motivo', e.motivo)
+  );
+}
+
 /**
  * Agrega un `<gEvento>` a `<gEventos>` (creándolo si es el primer evento del DTE, con el mismo
  * sufijo correlativo que `vDTE`/`dDTE` — ver docs/PLAN.md sección 5.3). Muta `documento` en el
@@ -415,7 +442,11 @@ export function agregarEvento(documento: Document, idDte: string, evento: Evento
       ? construirNodoEndoso(evento)
       : evento.tipo === 'PAGO'
         ? construirNodoPago(evento)
-        : construirNodoCancelacion(evento);
+        : evento.tipo === 'CANCELACION'
+          ? construirNodoCancelacion(evento)
+          : evento.tipo === 'BLOQUEO'
+            ? construirNodoBloqueo(evento)
+            : construirNodoLevantamientoBloqueo(evento);
 
   const fragmentoEvento = Parse(
     `<gEvento xmlns="${NAMESPACE_PAGARE}" ID="${escaparXml(evento.idEvento)}">${contenido}</gEvento>`,
