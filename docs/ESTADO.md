@@ -540,6 +540,87 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   rica. Un editor visual similar para `admin/parametros`/`admin/catalogos` (hoy JSON crudo /
   tabla genérica de solo lectura) queda como posible pulido futuro, no bloqueante del DoD.
 
+## F13 — Kubernetes + observabilidad + runbook
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa (con limitaciones de sandbox honestamente documentadas, ver más abajo)
+- **DoD ejecutado:**
+  - Infraestructura de colas real (BullMQ + `@nestjs/bullmq`): 4 colas (`resellado-ltv`,
+    `reconciliacion`, `notificaciones`, `vencimientos-proximos`) en `apps/api/src/jobs/`, cada una
+    envolviendo el servicio ya probado en F7/F9/F11 (`ReselladoService`, `ReconciliacionService`,
+    `NotificacionesService`, `VencimientoNotificacionService`) con repeatable jobs reales
+    (`upsertJobScheduler`) en vez de invocación directa. Proceso `worker` separado
+    (`PROCESS_ROLE=worker`, `apps/api/src/main.worker.ts` + `worker.module.ts`,
+    `createApplicationContext` sin HTTP) para no duplicar ejecuciones al escalar la api
+    horizontalmente. Verificado end-to-end en el sandbox (sin Docker, Redis/Postgres nativos):
+    build/typecheck limpios, el worker arranca y registra los 4 repetibles
+    (`JobsSchedulerService`), un job de prueba encolado manualmente en `notificaciones` transicionó
+    a `completed` (confirmado con `getJobCounts()`/`job.getState()`, no solo que el código
+    compila). Ver ADR-030.
+  - `readyz` (`SaludService`) ahora también resuelve `ProviderFactoryService` (FIRMA/TSA/OCSP) —
+    cierra un pendiente real desde F2 que la sección 11 del plan exige explícitamente para las
+    probes de K8s. e2e nuevo: `test/salud/salud.e2e-spec.ts` (3 casos: healthz, readyz, metrics).
+  - Dockerfiles multi-stage: `infra/docker/Dockerfile.api` (actualizado: agrega
+    `chromium`+`ghostscript` vía `apk`, ausentes hasta ahora aunque `ExportacionService` ya los usa
+    de forma síncrona desde F9, y copia `db/migrations` para que `migrate-job.yaml` pueda reusar la
+    misma imagen), `infra/docker/Dockerfile.api-worker` (nuevo, mismo build, `PROCESS_ROLE=worker`,
+    `CMD dist/main.worker.js`), `infra/docker/Dockerfile.web` (ya estaba completo desde F0 —
+    verificado `output: 'standalone'` en `next.config.js`). `node-pg-migrate` movido de
+    `devDependencies` a `dependencies` (lo necesita `migrate-job.yaml` en runtime).
+  - Manifests K8s (`infra/k8s/base/`): `namespace`, `configmap`, `secrets.example` (plantilla, no
+    aplicable), `redis` (StatefulSet+PVC, en todos los entornos), `api-deployment` (2 réplicas,
+    probes `/api/healthz`/`/api/readyz`, resources, PDB), `worker-deployment` (1 réplica, sin
+    probes HTTP — no tiene listener), `web-deployment` (2 réplicas, probes en `/login`, PDB),
+    `services`, `ingress` (TLS cert-manager, rutas `/api`→api `/`→web), `hpa-api` (CPU 70%,
+    min2/max6), `migrate-job` (reusa la imagen de la api), `cronjob-backup` (pg_dump diario,
+    subida a bucket como placeholder intencional), `networkpolicy` (deny-all + reglas explícitas
+    por flujo, incluida DNS y HTTPS saliente arbitrario para integraciones REAL sin allowlist de
+    IP fijo). `infra/k8s/postgres/` (StatefulSet PG15, SOLO dev/demo). Kustomize
+    `overlays/dev` (Postgres propio, `letsencrypt-staging`, dominio dev, réplicas 1) y
+    `overlays/prod` (sin Postgres propio, `ALLOW_SIMULATOR=false`, dominio real, `NetworkPolicy`
+    adicional para el egreso al Postgres gestionado — CIDR placeholder a completar por entorno).
+  - Corregido en el camino: `apps/web/.../verificar/[codigo]/page.tsx` (Server Component) leía
+    `NEXT_PUBLIC_API_BASE_URL`/`NEXT_PUBLIC_BASE_URL` — Next.js los hornea como literal en el build
+    sin importar si el código es server o cliente, así que un `ConfigMap` de K8s nunca los hubiera
+    podido cambiar sin reconstruir la imagen. Pasa a leer `API_BASE_URL_INTERNO`/`PUBLIC_BASE_URL`
+    (sin prefijo, runtime real). Ver ADR-031.
+  - `docs/RUNBOOK.md` completo: arranque (build+push de las 3 imágenes, migrate-job, apply del
+    overlay, `scripts/smoke-k8s.sh`), secretos (creación y consideraciones de rotación),
+    backup/restore y preservación ≥10 años (distingue resellado LTV — lo que de verdad sostiene la
+    validez probatoria — del backup de PostgreSQL, que es recuperación operativa), conmutación a
+    WS reales paso a paso (referencia ADR-026), troubleshooting (tabla de síntomas comunes), plan
+    de cese/retención de 10 años, y una sección de limitaciones honestas de esta entrega.
+  - `scripts/smoke-k8s.sh`: verifica rollouts + `/api/readyz` + `/login` + `/verificar/<código>`
+    post-deploy. Código listo, no ejecutable en este sandbox (sin cluster).
+  - `pnpm build/lint/typecheck` verdes en los 7 paquetes; suite completa de Playwright (22/22) y
+    e2e de API (15/15 suites tras agregar `salud.e2e-spec.ts`) reverificadas después de los cambios
+    de esta fase.
+  - Validación de manifests: `kubernetes-validate` (PyPI) contra el esquema K8s 1.32 en modo
+    `strict` — 25/25 objetos de `base/`+`postgres/` válidos, más el recurso adicional de
+    `overlays/prod`. Sustituto de `kubeconform`, que no se pudo instalar (descarga de GitHub
+    Releases bloqueada por el proxy del sandbox) — mismo patrón que `maildev`/verificador PDF/A
+    estructural en fases previas.
+- **Decisiones registradas:** ADR-030 (BullMQ + proceso worker dedicado, qué jobs de la sección 9
+  quedan pendientes y por qué), ADR-031 (variables de runtime vs. build-time en Next.js dentro de
+  K8s, `readyz` con ProviderFactory, `kubernetes-validate` como sustituto de `kubeconform`).
+- **Pendiente (honestamente documentado, no se fuerza bajo presión de tiempo):**
+  - `docker build`, `kind create cluster`, `kubectl apply` y `scripts/smoke-k8s.sh` no se
+    ejecutaron contra un cluster real — este sandbox no tiene Docker daemon. Todo se validó por
+    esquema (`kubernetes-validate`) y revisión manual de los patches de kustomize (`kustomize
+    build` tampoco disponible). Ver `docs/RUNBOOK.md` sección 7 para el detalle completo.
+  - El job "vencimientos" (auto-transición de un DTE a estado VENCIDO vía `fn_aplicar_evento`)
+    sigue sin implementarse — requiere nuevas filas en `cat_tipo_evento`/`cat_transicion` y
+    probablemente soporte en `xml-engine` para el nuevo tipo de evento. Ya lo dejaron pendiente
+    F7/F9/F11; se decidió no inventar esa lógica de negocio bajo presión de tiempo en F13.
+  - El job "firmas-pendientes" (poll de `consultarEstado`) no se implementó: en modo SIMULADOR
+    `solicitarFirma` resuelve sincrónicamente, así que no hay nada real contra qué probarlo hasta
+    que exista un proveedor REAL sin callback.
+  - El job "exportaciones" (cola on-demand para PDF/A+contenedor) sigue síncrono en el proceso api
+    — es el diseño ya construido y probado en F9/F12 (descarga como blob autenticado); moverlo a
+    asíncrono exigiría rediseñar ese flujo sin beneficio claro dado el tamaño típico del artefacto.
+  - Conformidad PDF/A real (veraPDF, F9) y MailHog real vía Docker (F11) siguen pendientes por las
+    mismas razones de sandbox ya documentadas en esas fases.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -551,15 +632,17 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F13 (Kubernetes + observabilidad + runbook): siguiente fase autónoma a ejecutar — Dockerfiles
-  multi-stage (api, api-worker con chromium+ghostscript, web standalone), manifests, migrate-job,
-  overlays dev/prod, `docs/RUNBOOK.md`. Esta fase es también donde se retoma la infraestructura de
-  cola/cron real (`api-worker`/BullMQ) que F7/F9/F11 dejaron como invocación directa.
-- Jobs de vencimiento/resellado/reconciliación/notificaciones siguen siendo invocación directa, no
-  cron real — ver "Pendiente" en F7/F9/F11 (se retoman con `api-worker`/BullMQ en F13).
+- F14 (Endurecimiento y cierre): siguiente fase autónoma a ejecutar — última del plan.
+- El job "vencimientos" (transición VENCIDO vía `fn_aplicar_evento`) sigue pendiente — ver
+  "Pendiente" en F13 (requiere catálogo nuevo + soporte en xml-engine, fuera de alcance de una
+  fase de infraestructura).
+- El job "firmas-pendientes" (poll de proveedores de firma sin callback) sigue pendiente — no hay
+  nada real que probar hasta que exista un proveedor REAL sin callback.
 - Conformidad PDF/A real (veraPDF) queda pendiente — ver "Pendiente" en F9.
 - MailHog real (Docker) no se pudo levantar en este sandbox — ver "Pendiente" en F11 (`maildev`
   como sustituto de prueba, sin impacto en el código de producción).
+- `docker build`/`kind`/`kubectl apply` contra un cluster real no se pudieron ejecutar en este
+  sandbox — ver "Pendiente" en F13 y `docs/RUNBOOK.md` sección 7.
 - Editor visual de tabla clave/valor para JSON crudo en `admin/integraciones` (F10) y posible
   editor visual similar para `admin/parametros`/`admin/catalogos` (F12) — pulido de UI, no
   bloqueante de ningún DoD.

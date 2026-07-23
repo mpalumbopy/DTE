@@ -1,0 +1,142 @@
+# Egreso restringido (ver docs/PLAN.md sección 11): deny-all por defecto, más políticas explícitas
+# por flujo. api/worker necesitan egreso HTTPS arbitrario hacia afuera del cluster porque, en modo
+# REAL (ALLOW_SIMULATOR=false), los adaptadores HTTP de @psdte/crypto-providers llaman a hosts de
+# integración configurados en `integracion_ws` (FIRMA/TSA/OCSP/CRL) que no se conocen de antemano —
+# no se puede enumerar un allowlist de IPs fijo sin romper la conmutación desde /admin/integraciones.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-default-deny
+  namespace: psdte
+spec:
+  podSelector: {}
+  policyTypes: ['Ingress', 'Egress']
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-dns-egress
+  namespace: psdte
+spec:
+  podSelector: {}
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-web-to-api
+  namespace: psdte
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-web
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: psdte-api
+      ports:
+        - protocol: TCP
+          port: 3001
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-api-ingress
+  namespace: psdte
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-api
+  policyTypes: ['Ingress']
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: psdte-web
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3001
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-web-ingress
+  namespace: psdte
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-web
+  policyTypes: ['Ingress']
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-api-worker-to-db
+  namespace: psdte
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ['psdte-api', 'psdte-worker']
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: psdte-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: psdte-redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # En prod, Postgres suele ser gestionado (fuera del cluster, ver infra/k8s/postgres/README) —
+    # el egreso hacia el host real del RDS/Cloud SQL se permite en overlays/prod, no acá.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-api-worker-https-egress
+  namespace: psdte
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ['psdte-api', 'psdte-worker']
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32 # bloquea metadata de la nube (SSRF), ver checklist de seguridad
+      ports:
+        - protocol: TCP
+          port: 443

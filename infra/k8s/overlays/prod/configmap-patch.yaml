@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: psdte-config
+  namespace: psdte
+data:
+  # Candado de producción (ver apps/api/src/main.ts#verificarCandadoSimulador, docs/PLAN.md
+  # sección 6.2): con esto en false, el arranque de la api FALLA si FIRMA/TSA/OCSP siguen en
+  # SIMULADOR — es intencional, no un bug del candado.
+  ALLOW_SIMULATOR: 'false'
+  PUBLIC_BASE_URL: 'https://psdte.example.py'
+  SMTP_HOST: 'CAMBIAR-smtp-real'
+  SMTP_PORT: '587'

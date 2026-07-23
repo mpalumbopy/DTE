@@ -1,4 +1,16 @@
 # syntax=docker/dockerfile:1
+#
+# Mismo build que Dockerfile.api (mismo dist, mismo código) — solo cambia el runtime: PROCESS_ROLE
+# fijo en 'worker', y CMD apunta a dist/main.worker.js (createApplicationContext, sin HTTP; ver
+# apps/api/src/worker.module.ts). Incluye chromium+ghostscript aunque el worker no dispara todavía
+# el job de exportaciones on-demand (ese sigue síncrono en el proceso api, ver docs/ESTADO.md F13
+# "Pendiente"): JobsModule importa ExportacionModule completo (para ReselladoService/
+# ReconciliacionService), y Nest instancia todos sus providers al cargar el módulo — incluido
+# ExportacionService, que referencia CHROMIUM_PATH/GHOSTSCRIPT_PATH en su constructor aunque no los
+# invoque hasta que se genera un PDF. Sin los binarios el proceso igual arranca (no se tocan en el
+# constructor), pero el plan (sección 11) pide explícitamente la imagen del worker con
+# chromium+ghostscript — se respeta tal cual para no dejar la imagen coja el día que el job de
+# exportaciones se mueva acá.
 FROM node:20-alpine AS base
 RUN corepack enable
 WORKDIR /repo
@@ -15,17 +27,9 @@ FROM deps AS build
 COPY . .
 RUN pnpm --filter @psdte/shared --filter @psdte/xml-engine --filter @psdte/crypto-providers --filter @psdte/api build
 
-# Chromium (representación PDF vía puppeteer-core) + Ghostscript (conformidad PDF/A-2b, F9) —
-# el proceso api ejecuta ExportacionService de forma síncrona sobre la petición HTTP de
-# exportación (ver docs/DECISIONES.md ADR-025/ADR-030), así que las necesita en runtime, no solo
-# el worker.
 FROM base AS runtime
 ENV NODE_ENV=production
-ENV PROCESS_ROLE=api
-# No se fija CHROMIUM_PATH/GHOSTSCRIPT_PATH: los defaults de config.schema.ts ya son 'chromium' y
-# 'gs' (nombres resolubles por PATH), que es exactamente como quedan expuestos los binarios de
-# `apk add chromium ghostscript` en Alpine — evita hardcodear una ruta absoluta que no se pudo
-# verificar en este sandbox (sin Docker, ver docs/ESTADO.md F13).
+ENV PROCESS_ROLE=worker
 RUN apk add --no-cache chromium ghostscript ttf-freefont
 RUN addgroup -S psdte && adduser -S psdte -G psdte
 WORKDIR /app
@@ -35,10 +39,5 @@ COPY --from=build /repo/apps/api/package.json ./package.json
 COPY --from=build /repo/packages/shared/dist ./node_modules/@psdte/shared/dist
 COPY --from=build /repo/packages/xml-engine/dist ./node_modules/@psdte/xml-engine/dist
 COPY --from=build /repo/packages/crypto-providers/dist ./node_modules/@psdte/crypto-providers/dist
-# db/migrations viaja en la MISMA imagen que la api (no un Dockerfile aparte, ver plan sección 13
-# F13: solo 3 imágenes — api, api-worker, web) — migrate-job.yaml reusa esta imagen sobreescribiendo
-# el comando.
-COPY --from=build /repo/db/migrations ./db/migrations
 USER psdte
-EXPOSE 3001
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/main.worker.js"]

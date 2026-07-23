@@ -1,0 +1,21 @@
+# Config NO sensible (ver docs/PLAN.md sección 11.1). Todo lo que requiera secreto vive en
+# secrets.example.yaml (plantilla) — el Secret real se crea fuera de git (ver docs/RUNBOOK.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: psdte-config
+  namespace: psdte
+data:
+  NODE_ENV: 'production'
+  PORT: '3001'
+  ALLOW_SIMULATOR: 'true' # sobreescrito a 'false' en overlays/prod
+  XSD_PATH: '' # vacío = usa el default embebido en @psdte/xml-engine (ver config.schema.ts)
+  SEED_DEMO: 'false'
+  OTEL_EXPORTER_OTLP_ENDPOINT: ''
+  SMTP_HOST: 'mailhog.psdte.svc.cluster.local' # sobreescrito por overlay con el SMTP real en prod
+  SMTP_PORT: '1025'
+  SMTP_FROM: 'PSDTE <no-responder@psdte.local>'
+  # Web (Next.js, Server Components — variables SIN prefijo NEXT_PUBLIC_, leídas en runtime, no
+  # inlineadas en el build; ver apps/web/src/app/(publico)/verificar/[codigo]/page.tsx)
+  API_BASE_URL_INTERNO: 'http://psdte-api:3001/api/v1'
+  PUBLIC_BASE_URL: 'https://psdte.example.py' # sobreescrito por overlay con el dominio real

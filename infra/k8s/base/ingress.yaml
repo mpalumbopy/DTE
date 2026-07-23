@@ -1,0 +1,35 @@
+# TLS por cert-manager. Estos valores YA son los de prod (dominio real + issuer de producción) —
+# overlays/prod los hereda sin patch; overlays/dev es el que se desvía (dev.psdte.example.py,
+# letsencrypt-staging), vía overlays/dev/ingress-patch.yaml.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: psdte
+  namespace: psdte
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - psdte.example.py
+      secretName: psdte-tls
+  rules:
+    - host: psdte.example.py
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: psdte-api
+                port:
+                  number: 3001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: psdte-web
+                port:
+                  number: 3000

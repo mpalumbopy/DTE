@@ -1,0 +1,40 @@
+# Job de migraciones pre-deploy (hook manual en el pipeline de despliegue — ver docs/RUNBOOK.md,
+# "Arranque"): aplicar este Job y esperar a que complete ANTES de aplicar/actualizar
+# api-deployment.yaml y worker-deployment.yaml. Reusa la imagen de la api (node-pg-migrate y
+# db/migrations viajan en la misma imagen, ver infra/docker/Dockerfile.api) — no existe un
+# Dockerfile de migraciones aparte.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: psdte-migrate
+  namespace: psdte
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: psdte-api:local # sobreescrito por overlay (kustomize images:) — misma imagen que psdte-api
+          command: ['node', 'node_modules/.bin/node-pg-migrate', 'up', '-m', 'db/migrations', '-d', 'DATABASE_URL']
+          envFrom:
+            - configMapRef:
+                name: psdte-config
+            - secretRef:
+                name: psdte-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

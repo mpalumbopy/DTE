@@ -852,3 +852,68 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
     quedó a medias) ni reintentos; BullMQ ya estaba justificado por Redis como dependencia
     existente, así que el costo marginal de adoptarlo es bajo frente al beneficio de
     observabilidad/reintentos.
+
+## ADR-031 — F13: Dockerfiles/K8s — variables de runtime vs. build-time en Next.js, `readyz` con ProviderFactory, y `kubernetes-validate` como sustituto de `kubeconform`
+
+- **Fecha:** 2026-07-23
+- **Fase:** F13
+- **Contexto:** al escribir `infra/docker/Dockerfile.web` y los manifests de `infra/k8s/`, apareció
+  un problema real que el diseño de F8/F12 no había necesitado resolver todavía: Next.js inlinea
+  `process.env.NEXT_PUBLIC_*` como literal de texto en `next build`, sin importar si el código que
+  lo lee corre en un Server Component o en el cliente — es un paso de webpack, no una distinción de
+  runtime. `apps/web/src/app/(publico)/verificar/[codigo]/page.tsx` (un Server Component, SSR)
+  usaba `NEXT_PUBLIC_API_BASE_URL` y `NEXT_PUBLIC_BASE_URL` para su fetch server-side y para
+  construir la URL propia del QR — ambos, al estar "horneados" en el build, hubieran quedado fijos
+  al valor presente cuando se construyó la imagen, sin que el `ConfigMap` de un overlay de K8s
+  pudiera cambiarlos sin reconstruir y volver a publicar la imagen. Esto rompe el modelo "una
+  imagen, N entornos" que el resto de F13 asume (`images:` + overlays dev/prod).
+- **Decisión:**
+  - Esa página pasa a leer `API_BASE_URL_INTERNO` y `PUBLIC_BASE_URL` (SIN prefijo `NEXT_PUBLIC_`)
+    — variables planas que Next.js sí lee en runtime dentro de un Server Component, ya que nunca
+    llegan al bundle del cliente. `API_BASE_URL_INTERNO` apunta al Service interno del cluster
+    (`http://psdte-api:3001/api/v1`), evitando que el propio servidor rebote una petición SSR a
+    través del ingress público para hablar con su propio backend. Los usos legítimamente
+    client-side de `NEXT_PUBLIC_API_BASE_URL` (`lib/api-client.ts`, wizards con `'use client'`)
+    quedan sin cambios — a esos sí les corresponde el prefijo público, y su valor de producción es
+    simplemente `/api/v1` (relativo): como el ingress sirve `/` y `/api` desde el mismo origen, una
+    ruta relativa funciona en cualquier overlay sin necesitar un build distinto por entorno.
+  - `readyz` (`SaludService`) ahora también resuelve `ProviderFactoryService.obtenerProveedorFirma`/
+    `obtenerProveedorRevocacion('OCSP')` — cierra un pendiente real desde F2 (el comentario decía
+    "se agrega en F5" pero nunca se hizo) que la sección 11 del plan pide explícitamente para las
+    probes de K8s ("readyz verifica BD, Redis y que el ProviderFactory resuelva las integraciones
+    activas"). Sin llamadas de red: solo construye los adaptadores desde la config cacheada.
+  - `node-pg-migrate` se movió de `devDependencies` a `dependencies` en `apps/api/package.json`:
+    `migrate-job.yaml` reusa la imagen de la api (no hay un cuarto Dockerfile solo para
+    migraciones, ver plan sección 13 F13: "Dockerfiles... api, api-worker, web" — tres, no cuatro),
+    y ese binario debe existir en el runtime de esa misma imagen.
+  - `infra/docker/Dockerfile.api-worker` (nuevo) incluye `chromium`+`ghostscript` igual que
+    `Dockerfile.api`, aunque el worker no dispare todavía el job de exportaciones on-demand (sigue
+    síncrono en el proceso api): `JobsModule` importa `ExportacionModule` completo (para
+    `ReselladoService`/`ReconciliacionService`), y Nest instancia TODOS los providers de un módulo
+    importado — incluido `ExportacionService`, aunque nadie lo inyecte en el worker todavía. El
+    plan (sección 11) pide esos binarios en la imagen del worker explícitamente; se respeta tal
+    cual en vez de "optimizar" quitándolos.
+  - Validación de los manifests: ni `kubeconform` ni `kubectl`/`kind` se pudieron instalar/ejecutar
+    en este sandbox (sin Docker daemon; descarga de binarios de GitHub Releases bloqueada por el
+    proxy). Se usó `kubernetes-validate` (paquete PyPI, validador de esquema K8s real, mismo
+    proyecto de esquemas que consume `kubeconform` internamente) contra cada objeto de
+    `infra/k8s/base/` y `infra/k8s/postgres/` con el esquema 1.32 en modo `strict` — 25/25 objetos
+    válidos. Mismo patrón que `maildev`-por-MailHog (F11) y el verificador PDF/A estructural
+    (F9): sustituto honesto, documentado, no una afirmación de que el `kubeconform -strict` real
+    corrió.
+  - Los patches de kustomize (`overlays/dev`, `overlays/prod`) se revisaron a mano en vez de
+    render (`kustomize build` tampoco está disponible): el patch de `Ingress.spec.rules` en
+    `overlays/dev` usa JSON6902 quirúrgico por índice, no merge estratégico — `spec.rules` es una
+    lista sin merge-key declarado en el esquema de `Ingress`, así que un merge patch hubiera
+    reemplazado el arreglo completo (perdiendo los `http.paths` de api/web definidos en base) en
+    vez de solo cambiar el `host`.
+- **Alternativas descartadas:**
+  - Mantener `NEXT_PUBLIC_BASE_URL`/`NEXT_PUBLIC_API_BASE_URL` en la página SSR y resolver el
+    problema con un build por entorno (un `--build-arg` distinto para dev/prod) — descartado:
+    multiplica el número de imágenes a mantener y reintroduce exactamente el problema que
+    `kustomize overlays` existe para resolver (una imagen, config por overlay).
+  - Instalar `kubeconform` compilándolo desde el módulo Go (el proxy permite el proxy de Go) —
+    evaluado pero descartado por tiempo: requeriría además un toolchain de Go completo solo para
+    este chequeo puntual, cuando `kubernetes-validate` ya cubre la validación de esquema real con
+    una dependencia mucho más liviana (PyPI, ya usado en otras fases del proyecto para chequeos
+    similares).

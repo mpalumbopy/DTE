@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psdte-api
+  namespace: psdte
+  labels:
+    app.kubernetes.io/name: psdte-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: psdte-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: psdte-api:local # sobreescrito por overlay (kustomize images:)
+          ports:
+            - name: http
+              containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: psdte-config
+            - secretRef:
+                name: psdte-secrets
+          env:
+            - name: PROCESS_ROLE
+              value: 'api'
+          livenessProbe:
+            httpGet:
+              path: /api/healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: exportaciones
+              mountPath: /app/var/exportaciones
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: exportaciones
+          emptyDir: {} # EXPORT_DIR es un staging temporal (el artefacto final se hashea y se sube
+          # a `exportacion.uriObjeto`); no requiere PVC persistente (ver ADR-025).
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: psdte-api-pdb
+  namespace: psdte
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-api

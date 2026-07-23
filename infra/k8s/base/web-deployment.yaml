@@ -1,0 +1,74 @@
+# No hay un healthz dedicado en apps/web (es un frontend Next.js, no expone /healthz) — las probes
+# apuntan a /login, la única ruta pública que siempre renderiza sin autenticación (ya validada con
+# Lighthouse en F12, ver docs/ESTADO.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psdte-web
+  namespace: psdte
+  labels:
+    app.kubernetes.io/name: psdte-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: psdte-web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: psdte-web:local # sobreescrito por overlay (kustomize images:)
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: psdte-config
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: psdte-web-pdb
+  namespace: psdte
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-web

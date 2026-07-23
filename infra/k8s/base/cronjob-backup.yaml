@@ -1,0 +1,53 @@
+# pg_dump diario a objeto — PLACEHOLDER DE BUCKET (así lo pide el plan, sección 11): el comando de
+# subida real (aws s3 cp / mc cp / gsutil cp, según el proveedor) se completa en el overlay de cada
+# entorno, junto con las credenciales del bucket (Secret aparte, no incluido acá). Sin esa
+# sobreescritura, este Job solo genera el dump y lo deja en el emptyDir del pod (se pierde al
+# terminar) — es intencional: preferible que falle de forma obvia a fingir que subió algo a un
+# bucket que no existe. Ver docs/RUNBOOK.md, sección "Backup/restore".
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: psdte-backup-pg
+  namespace: psdte
+spec:
+  schedule: '0 4 * * *' # 04:00 diario
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  ARCHIVO="/backup/psdte-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+                  pg_dump "$DATABASE_URL" | gzip > "$ARCHIVO"
+                  echo "Dump generado: $ARCHIVO ($(du -h "$ARCHIVO" | cut -f1))"
+                  echo "PENDIENTE: subir $ARCHIVO al bucket de retención >= 10 años (ver docs/RUNBOOK.md) — comando de subida a completar por overlay/entorno."
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: psdte-secrets
+                      key: DATABASE_URL
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ['ALL']
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: backup
+              emptyDir: {}

@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: psdte
+resources:
+  - ../../base
+  # SIN infra/k8s/postgres/statefulset.yaml — prod asume Postgres gestionado (RDS/Cloud SQL/etc.),
+  # DATABASE_URL apunta a ese servicio vía el Secret real del entorno (fuera de este repo).
+  - networkpolicy-db-egress.yaml
+# Sin patch de Ingress: infra/k8s/base/ingress.yaml ya modela los valores reales de prod
+# (host psdte.example.py, cluster-issuer letsencrypt-prod) — es overlays/dev el que se desvía
+# (dev.psdte.example.py, letsencrypt-staging), no al revés.
+patches:
+  - path: configmap-patch.yaml
+images:
+  - name: psdte-api
+    newTag: stable
+  - name: psdte-api-worker
+    newTag: stable
+  - name: psdte-web
+    newTag: stable

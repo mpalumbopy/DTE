@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psdte-api
+  namespace: psdte
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psdte-web
+  namespace: psdte
+spec:
+  replicas: 1

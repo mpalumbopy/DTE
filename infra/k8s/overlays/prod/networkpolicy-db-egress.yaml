@@ -1,0 +1,24 @@
+# infra/k8s/base/networkpolicy.yaml permite egreso a Postgres/Redis vía podSelector (pods DENTRO
+# del cluster) — en prod, Postgres es gestionado (RDS/Cloud SQL/similar, fuera del cluster, ver
+# overlays/prod/kustomization.yaml), así que ese podSelector no matchea nada y el egreso quedaría
+# bloqueado. Completar el CIDR real del servicio gestionado antes de aplicar en prod — placeholder
+# a propósito, no un valor operativo (ver docs/RUNBOOK.md, "Troubleshooting").
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: psdte-api-worker-to-managed-db
+  namespace: psdte
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: ['psdte-api', 'psdte-worker']
+  policyTypes: ['Egress']
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 203.0.113.0/24 # CAMBIAR: CIDR real del Postgres gestionado del proveedor
+      ports:
+        - protocol: TCP
+          port: 5432

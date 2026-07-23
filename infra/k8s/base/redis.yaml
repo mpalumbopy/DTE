@@ -1,0 +1,68 @@
+# A diferencia de Postgres (ver infra/k8s/postgres/, dev/demo-only), Redis SÍ se despliega en
+# cluster en todos los entornos (dev y prod): acá solo cachea rate-limits/refresh-tokens y sirve de
+# broker de BullMQ (ver docs/DECISIONES.md ADR-030) — no tiene requisito de preservación >= 10 años
+# ni PITR, así que un StatefulSet propio con PVC es aceptable también en prod. Si el entorno
+# prefiere un Redis gestionado, alcanza con sobreescribir REDIS_URL en el Secret y no aplicar este
+# archivo.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: psdte
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: psdte-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command: ['redis-server', '--appendonly', 'yes']
+          ports:
+            - name: redis
+              containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ['redis-cli', 'ping']
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ['redis-cli', 'ping']
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: psdte
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: psdte-redis
+  ports:
+    - name: redis
+      port: 6379

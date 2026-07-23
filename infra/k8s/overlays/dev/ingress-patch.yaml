@@ -1,0 +1,12 @@
+# JSON6902 (no strategic merge): spec.rules es una lista sin merge-key declarado, así que un
+# merge patch reemplazaría el arreglo completo (perdiendo los `http.paths` de api/web). Un patch
+# quirúrgico por índice evita ese problema.
+- op: replace
+  path: /metadata/annotations/cert-manager.io~1cluster-issuer
+  value: letsencrypt-staging
+- op: replace
+  path: /spec/tls/0/hosts/0
+  value: dev.psdte.example.py
+- op: replace
+  path: /spec/rules/0/host
+  value: dev.psdte.example.py

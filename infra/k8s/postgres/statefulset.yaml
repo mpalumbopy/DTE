@@ -1,0 +1,78 @@
+# SOLO dev/demo (ver docs/PLAN.md sección 11): en prod se asume Postgres gestionado (RDS/Cloud SQL/
+# similar), con DATABASE_URL apuntando a ese servicio vía Secret — overlays/prod NO incluye este
+# directorio en su kustomization.yaml. Sin PITR/backups gestionados por el proveedor, un
+# StatefulSet casero no cumple el requisito de preservación >= 10 años de la Ley 6822/2021 (ver
+# docs/RUNBOOK.md, "Backup/restore PITR").
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: psdte
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: psdte-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: psdte
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: psdte-secrets
+                  key: POSTGRES_PASSWORD_DEV
+            - name: POSTGRES_DB
+              value: psdte
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ['pg_isready', '-U', 'psdte']
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ['pg_isready', '-U', 'psdte']
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: '1'
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: psdte
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: psdte-postgres
+  ports:
+    - name: postgres
+      port: 5432

@@ -1,0 +1,60 @@
+# PROCESS_ROLE=worker: createApplicationContext (ver apps/api/src/main.worker.ts), sin listener
+# HTTP — por eso no hay Service ni probes httpGet acá. 1 réplica: los repetibles se registran con
+# schedulerId fijo (upsertJobScheduler, idempotente), así que más de una réplica no correría el
+# trabajo en paralelo, pero tampoco aporta nada hasta que haya colas con volumen real que repartir
+# entre consumidores — se deja en 1 y se documenta como el primer lugar a escalar si el volumen de
+# jobs lo justifica (ver docs/RUNBOOK.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psdte-worker
+  namespace: psdte
+  labels:
+    app.kubernetes.io/name: psdte-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: psdte-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: psdte-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: psdte-api-worker:local # sobreescrito por overlay (kustomize images:)
+          envFrom:
+            - configMapRef:
+                name: psdte-config
+            - secretRef:
+                name: psdte-secrets
+          env:
+            - name: PROCESS_ROLE
+              value: 'worker'
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: exportaciones
+              mountPath: /app/var/exportaciones
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: exportaciones
+          emptyDir: {}

@@ -10,8 +10,13 @@ interface ResultadoPublico {
   integridadValida?: boolean;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:3001/api/v1';
-const PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+// Server Component: corre en el proceso Next.js (nunca en el bundle del cliente), así que usa
+// variables SIN el prefijo NEXT_PUBLIC_ — esas se inlinean como literal en `next build` y no
+// reflejarían el ConfigMap real de cada overlay (dev/prod) sin reconstruir la imagen (ver
+// docs/DECISIONES.md ADR-030). API_BASE_URL_INTERNO apunta al Service interno del cluster
+// (ej. http://psdte-api:3001/api/v1), no al ingress público.
+const API_BASE_URL = process.env.API_BASE_URL_INTERNO ?? 'http://localhost:3001/api/v1';
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000';
 
 async function consultarVerificacion(codigo: string): Promise<ResultadoPublico> {
   const res = await fetch(`${API_BASE_URL}/verificacion?codigo=${encodeURIComponent(codigo)}`, { cache: 'no-store' });

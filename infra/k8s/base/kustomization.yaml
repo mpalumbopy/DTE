@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: psdte
+# secrets.example.yaml NO se incluye acá a propósito: es una plantilla (ver el comentario en el
+# archivo), no un recurso aplicable. Cada overlay/entorno provee su propio Secret real (gitignored,
+# nunca en este repo) — ver docs/RUNBOOK.md, sección "Secretos".
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - redis.yaml
+  - api-deployment.yaml
+  - worker-deployment.yaml
+  - web-deployment.yaml
+  - services.yaml
+  - ingress.yaml
+  - hpa-api.yaml
+  - migrate-job.yaml
+  - cronjob-backup.yaml
+  - networkpolicy.yaml
+images:
+  - name: psdte-api:local
+    newName: psdte-api
+    newTag: latest
+  - name: psdte-api-worker:local
+    newName: psdte-api-worker
+    newTag: latest
+  - name: psdte-web:local
+    newName: psdte-web
+    newTag: latest

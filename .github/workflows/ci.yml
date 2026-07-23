@@ -66,5 +66,36 @@ jobs:
       - name: Integración/E2E API
         run: pnpm --filter @psdte/api test:e2e
 
+      - name: Playwright — instalar Chromium
+        run: pnpm --filter @psdte/web exec playwright install --with-deps chromium
+
+      - name: E2E web (Playwright, headless)
+        run: pnpm --filter @psdte/web test:e2e
+
       - name: pnpm audit (prod deps)
         run: pnpm audit --prod || echo "::warning::pnpm audit reportó hallazgos, revisar antes de release"
+
+      - name: Validar manifests K8s (kubernetes-validate, sustituto de kubeconform — ver ADR-031)
+        run: |
+          pip install --quiet kubernetes-validate
+          python3 - <<'PY'
+          import sys, glob, yaml
+          import kubernetes_validate as kv
+
+          archivos = sorted(glob.glob('infra/k8s/base/*.yaml')) + sorted(glob.glob('infra/k8s/postgres/*.yaml'))
+          errores = 0
+          for ruta in archivos:
+              with open(ruta) as f:
+                  docs = list(yaml.safe_load_all(f))
+              for doc in docs:
+                  if doc is None:
+                      continue
+                  kind = doc.get('kind', '?')
+                  name = doc.get('metadata', {}).get('name', '?')
+                  try:
+                      kv.validate(doc, '1.32.0', strict=True)
+                  except (kv.ValidationError, kv.SchemaNotFoundError) as e:
+                      errores += 1
+                      print(f'FALLA {ruta} [{kind}/{name}]: {e}')
+          sys.exit(1 if errores else 0)
+          PY

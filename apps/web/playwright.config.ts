@@ -17,7 +17,18 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], launchOptions: { executablePath: '/opt/pw-browsers/chromium' } },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Solo se fija un executablePath explícito si PLAYWRIGHT_CHROMIUM_PATH está seteado (el
+        // sandbox de desarrollo lo usa para apuntar al Chromium preinstalado en
+        // PLAYWRIGHT_BROWSERS_PATH, cuya versión no coincide con la que buscaría `playwright
+        // install`). En CI (GitHub Actions) o cualquier entorno sin esa variable, se deja que
+        // Playwright resuelva el binario que `playwright install --with-deps chromium` instaló en
+        // su ubicación default — hardcodear la ruta del sandbox rompería CI real.
+        launchOptions: process.env.PLAYWRIGHT_CHROMIUM_PATH
+          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
+          : {},
+      },
     },
   ],
   webServer: [
