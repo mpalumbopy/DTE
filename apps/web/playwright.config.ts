@@ -9,6 +9,7 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
+  globalSetup: require.resolve('./e2e/support/global-setup.ts'),
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'retain-on-failure',

@@ -110,6 +110,34 @@ describe('Catálogos, personas y parámetros (F3 e2e)', () => {
       .expect(403);
   });
 
+  it('F12: un tenedor puede buscar una persona por documento (para endosar) pero no listar el padrón completo', async () => {
+    const tokenTenedor = await loginDemo(app, 'tenedor');
+    const numeroDocumento = `TEST-TEN-${randomUUID().slice(0, 8)}`;
+    await request(app.getHttpServer())
+      .post('/api/v1/personas')
+      .set('Authorization', `Bearer ${tokenOperador}`)
+      .send({
+        tipoPersona: 1,
+        nombresApellidos: 'Buscable por Tenedor',
+        tipoDocumento: 1,
+        numeroDocumento,
+        paisDocumento: 600,
+      })
+      .expect(201);
+
+    const buscada = await request(app.getHttpServer())
+      .get(`/api/v1/personas?documento=${numeroDocumento}`)
+      .set('Authorization', `Bearer ${tokenTenedor}`)
+      .expect(200);
+    expect(buscada.body).toHaveLength(1);
+
+    const listadoCompleto = await request(app.getHttpServer())
+      .get('/api/v1/personas')
+      .set('Authorization', `Bearer ${tokenTenedor}`)
+      .expect(403);
+    expect(listadoCompleto.body.error).toBe('ERR-DTE-403');
+  });
+
   it('lista y actualiza parámetros del sistema (solo ADMIN_PSDTE)', async () => {
     const lista = await request(app.getHttpServer())
       .get('/api/v1/parametros')

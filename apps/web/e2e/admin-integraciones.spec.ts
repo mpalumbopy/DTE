@@ -1,28 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { authenticator } from 'otplib';
-
-const DEMO_MFA_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
-const DEMO_PASSWORD = 'Cambiar.123';
+import { DEMO_PASSWORD, iniciarSesion } from './support/sesion';
 
 /**
  * F10 DoD (docs/PLAN.md sección 6.5/13 — requisito explícito del usuario): editar TSA → probar
  * conexión (mock) OK → guardar → conmutar a REAL exige test previo y re-password → historial
  * registra → volver a SIMULADOR → banner reaparece · nunca se ve una credencial en claro.
+ * La sesión se inyecta directamente (ver support/sesion.ts) en vez de repetir el login por UI en
+ * cada test — el login/MFA real ya se prueba una sola vez en auth-ui.spec.ts.
  */
 test.describe('Admin de integraciones', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/login');
-    await page.getByTestId('input-username').fill('admin');
-    await page.getByTestId('input-password').fill(DEMO_PASSWORD);
-    await page.getByTestId('btn-login').click();
-
-    await expect(page.getByTestId('form-mfa')).toBeVisible();
-    const codigo = authenticator.generate(DEMO_MFA_SECRET);
-    await page.getByTestId('input-mfa').fill(codigo);
-    await page.getByTestId('btn-mfa').click();
-
-    await expect(page).toHaveURL(/\/dashboard/);
-    await page.goto('/admin/integraciones');
+    await iniciarSesion(page, 'admin', '/admin/integraciones');
   });
 
   test('banner de simulador visible al entrar (TSA/FIRMA/OCSP arrancan en SIMULADOR)', async ({ page }) => {

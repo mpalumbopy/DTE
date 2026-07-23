@@ -16,6 +16,7 @@ import { CatRol } from '../../entities/cat-rol.entity';
 import { Usuario } from '../../entities/usuario.entity';
 import { ConsultaVerificacion } from '../../entities/consulta-verificacion.entity';
 import { Persona } from '../../entities/persona.entity';
+import { DteBloqueo } from '../../entities/dte-bloqueo.entity';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 
@@ -33,6 +34,7 @@ export interface ResultadoPublico {
   existe: boolean;
   idDte?: string;
   estado?: string;
+  estadoCodigo?: number;
   fechaEmision?: Date;
   hashVerificacion?: string;
   integridadValida?: boolean;
@@ -50,14 +52,17 @@ export interface ResultadoDetallado extends ResultadoPublico {
   cadenaHashValida?: boolean;
   tenedorActualPersonaId?: string | null;
   eventos?: Array<{
+    id: string;
     numeroEvento: string;
     tipoEvento: number;
     fechaEvento: Date;
+    estadoPrevio: number;
     estadoResultante: number;
     rolActor: string;
     actorDescripcion: string;
   }>;
   firmas?: Array<{
+    eventoId: string | null;
     rolFirmante: string;
     ambito: string;
     estadoValidacion: string;
@@ -69,6 +74,7 @@ export interface ResultadoDetallado extends ResultadoPublico {
     rolParte: string;
     condicionFirmante: string | null;
   }>;
+  bloqueoActivoId?: string | null;
 }
 
 /**
@@ -91,6 +97,7 @@ export class VerificacionService {
     @InjectRepository(Usuario) private readonly usuarioRepo: Repository<Usuario>,
     @InjectRepository(ConsultaVerificacion) private readonly consultaRepo: Repository<ConsultaVerificacion>,
     @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
+    @InjectRepository(DteBloqueo) private readonly bloqueoRepo: Repository<DteBloqueo>,
   ) {}
 
   async verificarIntegridad(dte: Dte, ultimaVersion: DteXmlVersion): Promise<ResultadoIntegridad> {
@@ -150,6 +157,7 @@ export class VerificacionService {
       existe: true,
       idDte: dte.idDte,
       estado: estado?.nombre ?? String(dte.estadoActual),
+      estadoCodigo: dte.estadoActual,
       fechaEmision: dte.fechaEmision,
       hashVerificacion: dte.hashVigente ?? undefined,
       integridadValida: integridad.valida,
@@ -175,6 +183,7 @@ export class VerificacionService {
       nivelAcceso,
       idDte: dte.idDte,
       estado: estado?.nombre ?? String(dte.estadoActual),
+      estadoCodigo: dte.estadoActual,
       fechaEmision: dte.fechaEmision,
       hashVerificacion: dte.hashVigente ?? undefined,
       integridadValida: integridad.valida,
@@ -185,12 +194,13 @@ export class VerificacionService {
       return base;
     }
 
-    const [cadenaHash, eventos, firmas, tenenciaVigente, partes] = await Promise.all([
+    const [cadenaHash, eventos, firmas, tenenciaVigente, partes, bloqueoActivo] = await Promise.all([
       this.verificarCadenaHashes(dte.id),
       this.eventoRepo.find({ where: { dteId: dte.id }, order: { secuencia: 'ASC' } }),
       this.firmaRepo.find({ where: { dteId: dte.id }, order: { creadoEn: 'ASC' } }),
       this.tenenciaRepo.findOne({ where: { dteId: dte.id, hasta: IsNull() } }),
       this.parteRepo.find({ where: { dteId: dte.id }, order: { orden: 'ASC' } }),
+      this.bloqueoRepo.findOne({ where: { dteId: dte.id, eventoLevantamientoId: IsNull() } }),
     ]);
     const personas = partes.length > 0 ? await this.personaRepo.findBy({ id: In(partes.map((p) => p.personaId)) }) : [];
     const nombrePorPersonaId = new Map(personas.map((p) => [p.id, p.nombresApellidos ?? p.razonSocial ?? p.id]));
@@ -212,14 +222,17 @@ export class VerificacionService {
       cadenaHashValida: cadenaHash.valida,
       tenedorActualPersonaId: tenenciaVigente?.personaId ?? null,
       eventos: eventos.map((e) => ({
+        id: e.id,
         numeroEvento: e.numeroEvento,
         tipoEvento: e.tipoEvento,
         fechaEvento: e.fechaEvento,
+        estadoPrevio: e.estadoPrevio,
         estadoResultante: e.estadoResultante,
         rolActor: e.rolActor,
         actorDescripcion: e.actorDescripcion,
       })),
       firmas: firmas.map((f) => ({
+        eventoId: f.eventoId,
         rolFirmante: f.rolFirmante,
         ambito: f.ambito,
         estadoValidacion: f.estadoValidacion,
@@ -231,6 +244,7 @@ export class VerificacionService {
         rolParte: p.rolParte,
         condicionFirmante: p.condicionFirmante,
       })),
+      bloqueoActivoId: bloqueoActivo?.id ?? null,
     };
   }
 

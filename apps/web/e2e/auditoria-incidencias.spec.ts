@@ -1,8 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { authenticator } from 'otplib';
-
-const DEMO_MFA_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
-const DEMO_PASSWORD = 'Cambiar.123';
+import { iniciarSesion } from './support/sesion';
 
 /**
  * F11 DoD (docs/PLAN.md sección 13): "pantalla auditoría filtra por entidad/fecha y verifica
@@ -10,11 +7,8 @@ const DEMO_PASSWORD = 'Cambiar.123';
  * menciona; sección 8 la deja para F12) pero ya existe como página funcional — se cubre aquí
  * con un smoke test ligero.
  *
- * Los 3 tests comparten una sola página/sesión (en vez del login-por-test de admin-integraciones):
- * el token vive en sessionStorage (ver auth-context.tsx), que Playwright `storageState` no
- * captura, y POST /auth/login está limitado a 5 intentos/60s por IP (anti fuerza bruta) — todas
- * las specs de este archivo comparten esa IP local, así que un login por archivo evita agotar el
- * cupo junto con otras suites.
+ * La sesión de admin se inyecta una sola vez (support/sesion.ts cachea el token entre archivos)
+ * y se comparte entre los 3 tests — el login/MFA real ya se prueba en auth-ui.spec.ts.
  */
 test.describe.configure({ mode: 'serial' });
 
@@ -23,17 +17,7 @@ test.describe('Auditoría e incidencias (F11)', () => {
 
   test.beforeAll(async ({ browser }) => {
     page = await browser.newPage();
-    await page.goto('/login');
-    await page.getByTestId('input-username').fill('admin');
-    await page.getByTestId('input-password').fill(DEMO_PASSWORD);
-    await page.getByTestId('btn-login').click();
-
-    await expect(page.getByTestId('form-mfa')).toBeVisible();
-    const codigo = authenticator.generate(DEMO_MFA_SECRET);
-    await page.getByTestId('input-mfa').fill(codigo);
-    await page.getByTestId('btn-mfa').click();
-
-    await expect(page).toHaveURL(/\/dashboard/);
+    await iniciarSesion(page, 'admin');
   });
 
   test.afterAll(async () => {

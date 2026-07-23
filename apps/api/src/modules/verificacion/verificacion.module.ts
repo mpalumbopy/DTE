@@ -12,6 +12,7 @@ import { CatRol } from '../../entities/cat-rol.entity';
 import { Usuario } from '../../entities/usuario.entity';
 import { ConsultaVerificacion } from '../../entities/consulta-verificacion.entity';
 import { Persona } from '../../entities/persona.entity';
+import { DteBloqueo } from '../../entities/dte-bloqueo.entity';
 import { VerificacionController } from './verificacion.controller';
 import { VerificacionService } from './verificacion.service';
 
@@ -30,6 +31,7 @@ import { VerificacionService } from './verificacion.service';
       Usuario,
       ConsultaVerificacion,
       Persona,
+      DteBloqueo,
     ]),
   ],
   controllers: [VerificacionController],
