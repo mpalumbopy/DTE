@@ -510,3 +510,30 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   fija en `cat_transicion` (como venía el seed) — se descarta porque un DTE puede bloquearse desde
   distintos estados (EMITIDO, ENDOSADO, PRESENTADO_AL_COBRO, etc.) y el levantamiento debe volver
   exactamente a ESE estado, no siempre a ENDOSADO.
+
+## ADR-024 — F8 (Verificación): nivel de acceso derivado de `cat_rol.nivel_acceso`
+
+- **Fecha:** 2026-07-23
+- **Fase:** F8
+- **Contexto:** el plan (sección 5.2) exige verificación por "nivel según auth" (CAT-DTE-04:
+  PUBLICO/INTERVINIENTE/AUTORIDAD/AUDITOR, códigos 1-4) tanto para `GET /verificacion?codigo=`
+  (público) como `GET /dte/:id/verificacion` (autenticado). `cat_rol.nivel_acceso` ya usa exactamente
+  esa misma escala numérica (CONSULTA_PUBLICA=1, OPERADOR_EMISION/TENEDOR/DEUDOR=2, AUTORIDAD=3,
+  ADMIN_PSDTE/AUDITOR=4) desde F1/F2 — no hace falta una tabla de mapeo nueva.
+- **Decisión:**
+  - `VerificacionService.resolverNivelAcceso`: toma el máximo `nivel_acceso` entre los roles del JWT.
+  - Nivel 1 (público) y nivel 2 sin relación con el DTE consultado devuelven la misma forma reducida
+    (`existencia/estado/fecha_emision/hash_verificacion/integridadValida`) — sin montos, sin nombres,
+    sin timeline (I: "sin datos personales").
+  - Nivel 2 (INTERVINIENTE) con relación real al DTE (parte en `dte_parte`, tenedor histórico en
+    `dte_tenencia`, o endosante/endosatario en `dte_endoso` — resuelto vía `usuario.persona_id`) y
+    niveles 3-4 (AUTORIDAD/AUDITOR, sin necesidad de relación) reciben el detalle completo: montos,
+    saldo, tenedor vigente, timeline de eventos y firmas, resultado de la cadena de hashes (I5).
+  - La integridad se recalcula siempre contra el XML vigente (`sha256Hex(canonicalizarExclusivo(...))`
+    comparado contra `dte.hash_vigente` Y `dte_xml_version.hash_sha256`) y se valida criptográficamente
+    cada `ds:Signature` embebida — nunca se confía en las columnas sin recomputar (I8).
+  - Toda consulta (pública o autenticada) se registra en `consulta_verificacion` (nivel, resultado,
+    usuario si aplica, ip) — sección 5.2/CAT-DTE-04.
+- **Alternativas descartadas:** crear una tabla de mapeo rol→nivel_consulta separada — se descarta
+  porque duplicaría `cat_rol.nivel_acceso` sin necesidad; si algún rol futuro necesitara un nivel de
+  verificación distinto a su nivel de acceso general, se puede agregar entonces sin romper nada ahora.

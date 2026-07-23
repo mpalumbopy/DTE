@@ -40,3 +40,4 @@ export * from './dte-endoso.entity';
 export * from './dte-pago.entity';
 export * from './dte-cancelacion.entity';
 export * from './dte-bloqueo.entity';
+export * from './consulta-verificacion.entity';

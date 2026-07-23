@@ -16,3 +16,4 @@ coverage/
 /apps/*/dist/
 /apps/web/.next/
 /scratchpad/
+/dump.rdb

@@ -327,6 +327,33 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   fase la requiere primero). Callback HMAC asíncrono del proveedor de firma sigue pendiente (mismo motivo
   que F6).
 
+## F8 — Verificación
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa
+- **DoD ejecutado (docs/PLAN.md sección 13):** e2e pública muestra existencia/estado/integridad sin
+  datos personales; alterar 1 byte del XML (insertando una versión con contenido corrupto, respetando
+  el append-only de `dte_xml_version` — I4) hace fallar la integridad; interviniente relacionado y
+  autoridad ven timeline/firmas completos; interviniente NO relacionado a un DTE ajeno solo ve el
+  nivel público.
+- **Hecho:**
+  - Entidad nueva: `ConsultaVerificacion` (`consulta_verificacion`, ya existía la tabla desde F1).
+  - `VerificacionService`: `verificarIntegridad` (recalcula hash contra `dte.hash_vigente` y
+    `dte_xml_version.hash_sha256`, valida cada `ds:Signature` embebida — I8), `verificarCadenaHashes`
+    (encadenamiento `dte_evento.hash_anterior` — I5), `consultaPublica` (nivel 1, sin datos
+    personales), `consultaDetallada` (nivel derivado de `cat_rol.nivel_acceso` del JWT + relación real
+    con el DTE vía `dte_parte`/`dte_tenencia`/`dte_endoso` — ver ADR-024).
+  - `VerificacionController`/`VerificacionModule`: `GET /verificacion?codigo=` (`@Publico()`, throttle
+    20/min) y `GET /dte/:id/verificacion` (autenticado, nivel según rol+relación).
+  - Test e2e nuevo (`test/verificacion/verificacion.e2e-spec.ts`, 5 casos). 35/35 e2e del monorepo en
+    verde junto con F1-F7.
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo.
+- **Decisiones registradas:** ADR-024 (nivel de acceso derivado de `cat_rol.nivel_acceso`, sin tabla
+  de mapeo nueva).
+- **Pendiente:** `GET /dte` (bandeja paginada) y `GET /dte/:id/xml?version=n` no se implementaron —
+  no forman parte del DoD literal de F8 (que es específicamente sobre verificación de integridad),
+  se retoman cuando F12 (frontend) los necesite para las pantallas de bandeja/detalle.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -338,7 +365,8 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F8 (Verificación): siguiente fase autónoma a ejecutar — `GET /dte/:id/verificacion` y
-  `GET /verificacion?codigo=…` (pública, sin datos personales) por nivel de acceso (sección 5.2/CAT-DTE-04).
+- F9 (Exportación y preservación): siguiente fase autónoma a ejecutar — jobs PDF/A y contenedor,
+  verificador offline (`packages/xml-engine/src/offline-verifier.ts` + CLI), resellado LTV.
 - Job de vencimiento (cron, evento VENCIDO) queda pendiente hasta que exista infraestructura de jobs —
   ver "Pendiente" en F7.
+- `GET /dte` y `GET /dte/:id/xml?version=n` quedan pendientes — ver "Pendiente" en F8.
