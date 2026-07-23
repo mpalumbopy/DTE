@@ -44,3 +44,4 @@ export * from './consulta-verificacion.entity';
 export * from './exportacion.entity';
 export * from './resellado-ltv.entity';
 export * from './incidencia.entity';
+export * from './integracion-ws-historial.entity';

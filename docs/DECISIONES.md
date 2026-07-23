@@ -584,3 +584,46 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
     abstracción XML-específica sobre contenido JSON.
   - Instalar veraPDF ahora — descartado por costo/beneficio dado el tiempo restante de la fase;
     queda como gap documentado y explícito, no oculto tras un chequeo que aparente ser el real.
+
+## ADR-026 — F10: modo REAL solo vía `/conmutar`; endpoints/mapeo como JSON en el formulario
+
+- **Fecha:** 2026-07-23
+- **Fase:** F10 (requisito explícito del usuario)
+- **Contexto:** la sección 6.5 describe el formulario de edición con un selector de `modo`
+  (SIMULADOR/REAL/DESHABILITADO) y, por separado, una "conmutación a REAL" con candados (test
+  previo ≤ 15 min + re-ingreso de contraseña). Si `PUT /admin/integraciones/:id` aceptara escribir
+  `modo=REAL` directamente, ese candado quedaría sin efecto: cualquiera con acceso al formulario
+  podría pasar a REAL sin pasar por las validaciones. Se detectó escribiendo el primer test e2e del
+  flujo (intentar `PUT` con `modo:'REAL'` y una URL inválida para fabricar un test fallido) — el
+  bug hubiera permitido justamente ese bypass.
+- **Decisión:**
+  - `IntegracionesAdminService.actualizar` (PUT) rechaza con `ERR-ESTADO-001` cualquier intento de
+    pasar de un modo distinto de REAL a REAL — esa transición SOLO puede ocurrir vía
+    `POST /:id/conmutar`, que sí aplica el candado (test vigente + contraseña vía `argon2.verify`
+    contra `usuario.password_hash`, más `@RequiereMfa` a nivel de controller). Bajar de REAL a
+    SIMULADOR/DESHABILITADO sigue siendo libre vía PUT (dirección seria, sin riesgo).
+  - Cada `PUT` (guardar) revalida la integración recién escrita (misma prueba que ejecutaría el
+    proveedor real) y persiste el resultado en `ultimo_test` — así "test exitoso previo" para
+    conmutar siempre refleja la config actualmente guardada, no una prueba manual olvidada.
+  - El manifiesto de credenciales nunca se lee en claro: `IntegracionSerializada` no incluye
+    `credencialesCifradas`/`mtlsCertCifrado`/`mtlsKeyCifrada`; solo expone
+    `credencialesEnmascaradas: "********" | null`. El formulario reenvía credenciales nuevas
+    explícitamente (campo `credenciales` en el DTO) solo para rotarlas; si se omite, el `PUT`
+    conserva las ya cifradas en BD.
+  - `endpoints`, `headersExtra` y `mapeoPayload` se editan como JSON crudo en un `<textarea>` en vez
+    de una tabla dinámica de pares clave/valor — simplificación deliberada dado el tiempo de la
+    fase; funcionalmente equivalente (el backend valida/persiste lo mismo), UI más rica queda para
+    F12 (Frontend completo).
+  - "Probar conexión" (`POST /:id/test`) construye el mismo `ConfigIntegracionResuelta` que usaría
+    `ProviderFactoryService` en producción y llama la MISMA fábrica de `@psdte/crypto-providers`
+    (`crearProveedorFirma`/`crearProveedorTsa`/`crearProveedorRevocacion`) — nunca un mock separado
+    del código real, para que el resultado del botón sea fiel a lo que pasaría al operar.
+  - Frontend: se bootstrapeó desde cero `apps/web` (login + MFA, `AuthProvider` con el access token
+    en `sessionStorage`, cliente HTTP mínimo, TanStack Query) porque no existía ninguna página
+    todavía — F10 es la primera pantalla real de `apps/web`. Playwright ya estaba en las
+    dependencias (anticipado en F0) pero sin `playwright.config.ts`; se agregó con dos
+    `webServer` (api + web) y `launchOptions.executablePath` apuntando al Chromium preinstalado del
+    sandbox (la versión de `@playwright/test` no coincide con la revisión empaquetada).
+- **Alternativas descartadas:** permitir que `PUT` cambie a REAL y mover el candado a un middleware
+  que inspeccione el body — descartado por ser más frágil (fácil de rodear agregando otro campo) que
+  simplemente prohibir la transición en el único lugar que persiste `modo`.

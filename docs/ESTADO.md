@@ -393,6 +393,43 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   resellado/reconciliación/vencimiento siguen siendo invocación directa, no cron real — se retoman
   cuando exista infraestructura `api-worker`/BullMQ (F13).
 
+## F10 — Admin de integraciones (UI + API) — requisito explícito del usuario
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa
+- **DoD ejecutado (docs/PLAN.md sección 6.5/13):** Playwright real (no mockeado): editar TSA →
+  probar conexión (simulador) OK → guardar → conmutar a REAL exige test previo y re-password
+  (probado sin password, con password incorrecta, y con la correcta) → historial registra la
+  conmutación → volver a SIMULADOR → banner reaparece. API nunca devuelve credenciales en claro
+  (verificado en e2e de API y en el Playwright).
+- **Hecho:**
+  - Backend: `IntegracionesAdminService`/`IntegracionesAdminController` en el módulo
+    `integraciones` ya existente (F5) — `GET /admin/integraciones`, `GET /:id`, `PUT /:id`,
+    `POST /:id/test`, `POST /:id/conmutar`, `GET /:id/historial`, `GET /estado-global`. Entidad
+    nueva `IntegracionWsHistorial` (tabla ya existía desde F1).
+  - El pasaje a REAL solo puede ocurrir vía `/conmutar` (PUT lo rechaza) — ver ADR-026 para el bug
+    real que esto cierra. `/conmutar` exige `ultimo_test.ok=true` de los últimos 15 min +
+    `argon2.verify` contra la contraseña del admin — MFA verificada ya la exige `@RequiereMfa` a
+    nivel de controller (primer uso real de ese decorator, existía desde F2 sin consumidores).
+  - "Probar conexión" y el revalidado automático al guardar reusan las MISMAS fábricas de
+    `@psdte/crypto-providers` que usa `ProviderFactoryService` en producción (no un mock aparte).
+  - Frontend (`apps/web`, bootstrapeado desde cero — primera pantalla real del monorepo):
+    `AuthProvider` (login + MFA, access token en `sessionStorage`), cliente HTTP mínimo
+    (`api-client.ts`), página `/admin/integraciones` completa (listado, formulario de edición,
+    probar conexión, guardar, modal de conmutación con contraseña, historial, banner global de
+    simulador en el layout privado).
+  - `playwright.config.ts` nuevo (dos `webServer`: api + web) + `e2e/admin-integraciones.spec.ts`
+    (3 casos, corridos contra Chromium real — no mockeado) + test e2e de API nuevo
+    (`test/integraciones/integraciones-admin.e2e-spec.ts`, 6 casos). 46/46 e2e de API + 3/3
+    Playwright en verde.
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo (incluye `apps/web` por primera vez).
+- **Decisiones registradas:** ADR-026 (candado de REAL solo vía `/conmutar`; JSON crudo para
+  endpoints/mapeo; frontend bootstrapeado desde cero).
+- **Pendiente:** editor visual de tabla clave/valor para `endpoints`/`headersExtra` (hoy JSON crudo
+  en textarea — funcionalmente completo, UI más rica en F12). Subida de PEM para mTLS vía archivo
+  (hoy se pega el texto PEM directamente). El resto de `apps/web` (dashboard, bandeja de DTE,
+  wizards, etc.) es explícitamente F12.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -404,9 +441,8 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F10 (Admin de integraciones — UI + API): siguiente fase autónoma a ejecutar — endpoints sección
-  6.5 completos + página `/admin/integraciones` (formulario, prueba de conexión, conmutación con
-  doble confirmación, historial, banner global de simulador).
+- F11 (Notificaciones, auditoría UI, incidencias): siguiente fase autónoma a ejecutar — plantillas
+  de email (MailHog en dev) + pantallas de auditoría/incidencias con filtros.
 - Jobs de vencimiento/resellado/reconciliación siguen siendo invocación directa, no cron real —
   ver "Pendiente" en F7/F9 (se retoman con `api-worker`/BullMQ en F13).
 - `GET /dte` y `GET /dte/:id/xml?version=n` quedan pendientes — ver "Pendiente" en F8.
