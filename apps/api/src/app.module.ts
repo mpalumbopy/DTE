@@ -19,6 +19,7 @@ import { ParametrosModule } from './modules/parametros/parametros.module';
 import { IntegracionesModule } from './modules/integraciones/integraciones.module';
 import { EmisionModule } from './modules/emision/emision.module';
 import { EventosModule } from './modules/eventos/eventos.module';
+import { DteModule } from './modules/dte/dte.module';
 import { VerificacionModule } from './modules/verificacion/verificacion.module';
 import { ExportacionModule } from './modules/exportacion/exportacion.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
@@ -61,6 +62,7 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     IntegracionesModule,
     EmisionModule,
     EventosModule,
+    DteModule,
     VerificacionModule,
     ExportacionModule,
     NotificacionesModule,

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { ErrorDominio } from '@psdte/shared';
 import { Parse, canonicalizarExclusivo, sha256Hex, validarFirmaXades } from '@psdte/xml-engine';
 import { AccessTokenPayload } from '../../common/guards/jwt-auth.guard';
@@ -15,13 +15,14 @@ import { CatEstadoDte } from '../../entities/cat-estado-dte.entity';
 import { CatRol } from '../../entities/cat-rol.entity';
 import { Usuario } from '../../entities/usuario.entity';
 import { ConsultaVerificacion } from '../../entities/consulta-verificacion.entity';
+import { Persona } from '../../entities/persona.entity';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 
 /** Niveles de CAT-DTE-04 (`cat_nivel_consulta`) — coinciden con `cat_rol.nivel_acceso`. */
-const NIVEL_PUBLICO = 1;
-const NIVEL_INTERVINIENTE = 2;
-const NIVEL_AUTORIDAD = 3;
+export const NIVEL_PUBLICO = 1;
+export const NIVEL_INTERVINIENTE = 2;
+export const NIVEL_AUTORIDAD = 3;
 
 export interface ResultadoIntegridad {
   valida: boolean;
@@ -62,6 +63,12 @@ export interface ResultadoDetallado extends ResultadoPublico {
     estadoValidacion: string;
     signingTime: Date;
   }>;
+  partes?: Array<{
+    personaId: string;
+    nombre: string;
+    rolParte: string;
+    condicionFirmante: string | null;
+  }>;
 }
 
 /**
@@ -83,6 +90,7 @@ export class VerificacionService {
     @InjectRepository(CatRol) private readonly rolRepo: Repository<CatRol>,
     @InjectRepository(Usuario) private readonly usuarioRepo: Repository<Usuario>,
     @InjectRepository(ConsultaVerificacion) private readonly consultaRepo: Repository<ConsultaVerificacion>,
+    @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
   ) {}
 
   async verificarIntegridad(dte: Dte, ultimaVersion: DteXmlVersion): Promise<ResultadoIntegridad> {
@@ -177,12 +185,15 @@ export class VerificacionService {
       return base;
     }
 
-    const [cadenaHash, eventos, firmas, tenenciaVigente] = await Promise.all([
+    const [cadenaHash, eventos, firmas, tenenciaVigente, partes] = await Promise.all([
       this.verificarCadenaHashes(dte.id),
       this.eventoRepo.find({ where: { dteId: dte.id }, order: { secuencia: 'ASC' } }),
       this.firmaRepo.find({ where: { dteId: dte.id }, order: { creadoEn: 'ASC' } }),
       this.tenenciaRepo.findOne({ where: { dteId: dte.id, hasta: IsNull() } }),
+      this.parteRepo.find({ where: { dteId: dte.id }, order: { orden: 'ASC' } }),
     ]);
+    const personas = partes.length > 0 ? await this.personaRepo.findBy({ id: In(partes.map((p) => p.personaId)) }) : [];
+    const nombrePorPersonaId = new Map(personas.map((p) => [p.id, p.nombresApellidos ?? p.razonSocial ?? p.id]));
 
     await this.registrarConsulta(dte.id, dte.idDte, Math.min(nivelAcceso, 4), usuario.sub, ip, 'ENCONTRADO', {
       integridadValida: integridad.valida,
@@ -214,10 +225,16 @@ export class VerificacionService {
         estadoValidacion: f.estadoValidacion,
         signingTime: f.signingTime,
       })),
+      partes: partes.map((p) => ({
+        personaId: p.personaId,
+        nombre: nombrePorPersonaId.get(p.personaId) ?? p.personaId,
+        rolParte: p.rolParte,
+        condicionFirmante: p.condicionFirmante,
+      })),
     };
   }
 
-  private async resolverNivelAcceso(usuario: AccessTokenPayload): Promise<number> {
+  async resolverNivelAcceso(usuario: AccessTokenPayload): Promise<number> {
     if (usuario.roles.length === 0) return NIVEL_PUBLICO;
     const niveles = await Promise.all(
       usuario.roles.map(async (codigo) => {
@@ -228,7 +245,7 @@ export class VerificacionService {
     return niveles.length > 0 ? Math.max(...niveles) : NIVEL_PUBLICO;
   }
 
-  private async esRelacionado(dteId: string, usuario: AccessTokenPayload): Promise<boolean> {
+  async esRelacionado(dteId: string, usuario: AccessTokenPayload): Promise<boolean> {
     const usuarioRow = await this.usuarioRepo.findOne({ where: { id: usuario.sub } });
     if (!usuarioRow?.personaId) return false;
     const personaId = usuarioRow.personaId;
@@ -241,6 +258,29 @@ export class VerificacionService {
     if (parte || tenencia || endoso) return true;
     const endosoComoEndosatario = await this.endosoRepo.findOne({ where: { dteId, endosatarioPersonaId: personaId } });
     return Boolean(endosoComoEndosatario);
+  }
+
+  /** IDs de DTE en los que la persona vinculada al usuario participa (parte, tenedor o endoso en
+   * cualquiera de los dos sentidos) — usado para acotar listados sin repetir `esRelacionado` por fila. */
+  async dteIdsRelacionados(usuario: AccessTokenPayload): Promise<string[]> {
+    const usuarioRow = await this.usuarioRepo.findOne({ where: { id: usuario.sub } });
+    if (!usuarioRow?.personaId) return [];
+    const personaId = usuarioRow.personaId;
+
+    const [partes, tenencias, endosante, endosatario] = await Promise.all([
+      this.parteRepo.find({ where: { personaId } }),
+      this.tenenciaRepo.find({ where: { personaId } }),
+      this.endosoRepo.find({ where: { endosantePersonaId: personaId } }),
+      this.endosoRepo.find({ where: { endosatarioPersonaId: personaId } }),
+    ]);
+    return Array.from(
+      new Set([
+        ...partes.map((p) => p.dteId),
+        ...tenencias.map((t) => t.dteId),
+        ...endosante.map((e) => e.dteId),
+        ...endosatario.map((e) => e.dteId),
+      ]),
+    );
   }
 
   private async registrarConsulta(

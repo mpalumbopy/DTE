@@ -67,6 +67,7 @@ INSERT INTO psdte.cat_error (codigo,http_status,mensaje,categoria) VALUES
  ('ERR-ESTADO-003',423,'DTE bloqueado por medida de autoridad','ESTADO'),
  ('ERR-CONC-001',409,'Conflicto de concurrencia: reintente la operación','CONCURRENCIA'),
  ('ERR-CTRL-001',403,'El solicitante no es el tenedor/controlador vigente','AUTORIZACION'),
+ ('ERR-DTE-403',403,'No tiene acceso a este DTE','AUTORIZACION'),
  ('ERR-DTE-404',404,'DTE inexistente','VALIDACION_SEMANTICA'),
  ('ERR-DTE-409',409,'ID-DTE ya registrado: singularidad violada','VALIDACION_SEMANTICA'),
  ('ERR-SISTEMA-001',500,'Error interno del servidor','SISTEMA'),

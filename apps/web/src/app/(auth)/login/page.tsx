@@ -28,7 +28,7 @@ export default function LoginPage() {
         setMfaPendingToken(resultado.mfaPendingToken);
         setPaso('MFA');
       } else {
-        router.push('/admin/integraciones');
+        router.push('/dashboard');
       }
     } catch (err) {
       setError(err instanceof ApiError ? `${err.message} (${err.codigo})` : 'Error de conexión');
@@ -43,7 +43,7 @@ export default function LoginPage() {
     setEnviando(true);
     try {
       await verificarMfa(mfaPendingToken, codigo);
-      router.push('/admin/integraciones');
+      router.push('/dashboard');
     } catch (err) {
       setError(err instanceof ApiError ? `${err.message} (${err.codigo})` : 'Error de conexión');
     } finally {

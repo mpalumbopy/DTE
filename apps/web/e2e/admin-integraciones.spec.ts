@@ -21,7 +21,8 @@ test.describe('Admin de integraciones', () => {
     await page.getByTestId('input-mfa').fill(codigo);
     await page.getByTestId('btn-mfa').click();
 
-    await expect(page).toHaveURL(/\/admin\/integraciones/);
+    await expect(page).toHaveURL(/\/dashboard/);
+    await page.goto('/admin/integraciones');
   });
 
   test('banner de simulador visible al entrar (TSA/FIRMA/OCSP arrancan en SIMULADOR)', async ({ page }) => {

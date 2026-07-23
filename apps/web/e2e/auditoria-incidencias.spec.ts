@@ -33,7 +33,7 @@ test.describe('Auditoría e incidencias (F11)', () => {
     await page.getByTestId('input-mfa').fill(codigo);
     await page.getByTestId('btn-mfa').click();
 
-    await expect(page).toHaveURL(/\/admin\/integraciones/);
+    await expect(page).toHaveURL(/\/dashboard/);
   });
 
   test.afterAll(async () => {

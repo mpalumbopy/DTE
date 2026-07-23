@@ -45,6 +45,7 @@ export const CAT_ERROR_CODIGOS = [
   'ERR-AUTH-005',
   'ERR-CONC-001',
   'ERR-CTRL-001',
+  'ERR-DTE-403',
   'ERR-DTE-404',
   'ERR-DTE-409',
   'ERR-ESTADO-001',
