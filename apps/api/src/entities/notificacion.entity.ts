@@ -34,6 +34,9 @@ export class Notificacion {
   @Column({ type: 'smallint', default: 0 })
   intentos!: number;
 
+  @Column({ name: 'error_mensaje', type: 'text', nullable: true })
+  errorMensaje!: string | null;
+
   @Column({ name: 'enviada_en', type: 'timestamptz', nullable: true })
   enviadaEn!: Date | null;
 

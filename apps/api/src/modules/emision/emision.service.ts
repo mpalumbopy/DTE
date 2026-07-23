@@ -44,8 +44,9 @@ import { DteXmlVersion } from '../../entities/dte-xml-version.entity';
 import { Certificado } from '../../entities/certificado.entity';
 import { Firma } from '../../entities/firma.entity';
 import { Evidencia } from '../../entities/evidencia.entity';
-import { Notificacion } from '../../entities/notificacion.entity';
 import { SolicitudFirma } from '../../entities/solicitud-firma.entity';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { CODIGO_NOTIFICACION_EMISION_CONFIRMADA, CODIGO_NOTIFICACION_SOLICITUD_FIRMA } from '../notificaciones/plantillas';
 import { BorradorEmisionStore } from './borrador-emision.store';
 import { aDatosGeneralesInput, BorradorEmisionState, FirmaParteRecolectada } from './borrador-emision.types';
 import { CrearEmisionDto } from './dto/crear-emision.dto';
@@ -54,7 +55,6 @@ import { DireccionDto } from './dto/direccion.dto';
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 const CODIGO_ESTADO_EMITIDO = 1;
 const CODIGO_EVIDENCIA_XML_FIRMADO = 1;
-const CODIGO_NOTIFICACION_EMISION_CONFIRMADA = 1;
 
 @Injectable()
 export class EmisionService {
@@ -64,6 +64,7 @@ export class EmisionService {
     private readonly idDteService: IdDteService,
     private readonly providerFactory: ProviderFactoryService,
     private readonly auditoriaService: AuditoriaService,
+    private readonly notificacionesService: NotificacionesService,
     private readonly configService: ConfigService<EnvConfig, true>,
     @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
     @InjectRepository(PersonaDireccion) private readonly personaDireccionRepo: Repository<PersonaDireccion>,
@@ -191,6 +192,15 @@ export class EmisionService {
           expiraEn,
         }),
       );
+
+      if (persona.email) {
+        await this.notificacionesService.crear({
+          tipoCodigo: CODIGO_NOTIFICACION_SOLICITUD_FIRMA,
+          destinatarioPersonaId: persona.id,
+          destino: persona.email,
+          datosPlantilla: { idDte: datosGenerales.idDte, rolFirmante: firmante.rol },
+        });
+      }
 
       const resultado = await firmaProvider.solicitarFirma({
         solicitudId: solicitud.id,
@@ -441,19 +451,6 @@ export class EmisionService {
         }),
       );
 
-      await manager.getRepository(Notificacion).save(
-        manager.getRepository(Notificacion).create({
-          tipoCodigo: CODIGO_NOTIFICACION_EMISION_CONFIRMADA,
-          dteId: dte.id,
-          eventoId: null,
-          destinatarioPersonaId: estado.acreedorInicialPersonaId,
-          destino: (await this.obtenerPersona(estado.acreedorInicialPersonaId)).email ?? 'sin-email@psdte.local',
-          asunto: `Pagaré ${datosGenerales.idDte} emitido`,
-          cuerpo: `El pagaré ${datosGenerales.idDte} fue emitido y registrado.`,
-          estado: 'PENDIENTE',
-        }),
-      );
-
       const idsSolicitudFirma = estado.firmasPartes.map((f) => f.solicitudFirmaId);
       if (idsSolicitudFirma.length > 0) {
         await manager
@@ -475,6 +472,17 @@ export class EmisionService {
       usuarioId,
       detalle: { idDte: dteCreado.idDte, monto: dteCreado.monto },
     });
+
+    const acreedor = await this.obtenerPersona(estado.acreedorInicialPersonaId);
+    if (acreedor.email) {
+      await this.notificacionesService.crear({
+        tipoCodigo: CODIGO_NOTIFICACION_EMISION_CONFIRMADA,
+        dteId: dteCreado.id,
+        destinatarioPersonaId: acreedor.id,
+        destino: acreedor.email,
+        datosPlantilla: { idDte: dteCreado.idDte, monto: dteCreado.monto, monedaCodigo: datosGenerales.codigoMoneda },
+      });
+    }
 
     await this.store.eliminar(idDatosGenerales);
     return { dteId: dteCreado.id, idDte: dteCreado.idDte, estadoActual: dteCreado.estadoActual };

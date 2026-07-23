@@ -9,10 +9,19 @@ INSERT INTO psdte.cat_tipo_evidencia (codigo, nombre, descripcion) VALUES
     (5, 'MANIFIESTO_EXPORTACION', 'Manifiesto de un contenedor de exportación probatoria')
 ON CONFLICT (codigo) DO NOTHING;
 
+-- F11: los 6 tipos de email de docs/PLAN.md sección 11 (emisión, solicitud de firma, endoso
+-- recibido, pago, bloqueo, vencimiento próximo) + DTE_CANCELADO (ya observado en el catálogo desde
+-- F6). DO UPDATE (no DO NOTHING): re-sembrar debe corregir canal/requiere_acuse de filas ya
+-- creadas por una versión anterior de este seed (venían en 'SISTEMA', ver ADR F11).
 INSERT INTO psdte.cat_tipo_notificacion (codigo, nombre, canal, requiere_acuse) VALUES
-    (1, 'EMISION_CONFIRMADA', 'SISTEMA', FALSE),
-    (2, 'ENDOSO_REGISTRADO', 'SISTEMA', FALSE),
-    (3, 'PAGO_REGISTRADO', 'SISTEMA', FALSE),
-    (4, 'BLOQUEO_APLICADO', 'SISTEMA', FALSE),
-    (5, 'DTE_CANCELADO', 'SISTEMA', FALSE)
-ON CONFLICT (codigo) DO NOTHING;
+    (1, 'EMISION_CONFIRMADA', 'EMAIL', TRUE),
+    (2, 'ENDOSO_REGISTRADO', 'EMAIL', TRUE),
+    (3, 'PAGO_REGISTRADO', 'EMAIL', FALSE),
+    (4, 'BLOQUEO_APLICADO', 'EMAIL', TRUE),
+    (5, 'DTE_CANCELADO', 'EMAIL', FALSE),
+    (6, 'SOLICITUD_FIRMA', 'EMAIL', TRUE),
+    (7, 'VENCIMIENTO_PROXIMO', 'EMAIL', FALSE)
+ON CONFLICT (codigo) DO UPDATE SET
+    nombre = EXCLUDED.nombre,
+    canal = EXCLUDED.canal,
+    requiere_acuse = EXCLUDED.requiere_acuse;

@@ -56,6 +56,7 @@ export const envSchema = z.object({
   SMTP_PORT: z.coerce.number().int().positive().optional().default(1025),
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
+  SMTP_FROM: z.string().optional().default('PSDTE <no-responder@psdte.local>'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

@@ -77,11 +77,11 @@ async function seedUsuariosDemo(client: Client): Promise<void> {
     let personaId: string | null = null;
     if (demo.persona) {
       const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO psdte.persona (tipo_persona, nombres_apellidos, tipo_documento, numero_documento, pais_documento)
-         VALUES (1, $1, $2, $3, 600)
-         ON CONFLICT (tipo_documento, numero_documento, pais_documento) DO UPDATE SET actualizado_en = now()
+        `INSERT INTO psdte.persona (tipo_persona, nombres_apellidos, tipo_documento, numero_documento, pais_documento, email)
+         VALUES (1, $1, $2, $3, 600, $4)
+         ON CONFLICT (tipo_documento, numero_documento, pais_documento) DO UPDATE SET actualizado_en = now(), email = EXCLUDED.email
          RETURNING id`,
-        [demo.persona.nombresApellidos, demo.persona.tipoDocumento, demo.persona.numeroDocumento],
+        [demo.persona.nombresApellidos, demo.persona.tipoDocumento, demo.persona.numeroDocumento, demo.email],
       );
       personaId = rows[0].id;
     }

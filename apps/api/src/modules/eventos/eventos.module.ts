@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { IntegracionesModule } from '../integraciones/integraciones.module';
+import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { Persona } from '../../entities/persona.entity';
 import { Usuario } from '../../entities/usuario.entity';
 import { CatPais } from '../../entities/cat-pais.entity';
@@ -47,6 +48,7 @@ import { EventosController } from './eventos.controller';
       Firma,
     ]),
     IntegracionesModule,
+    NotificacionesModule,
   ],
   controllers: [EventosController],
   providers: [IdDteService, EventosComunesService, EventosService, EndosoService, PagoService, BloqueoService, CancelacionService],

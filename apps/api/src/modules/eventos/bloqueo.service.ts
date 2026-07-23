@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { ErrorDominio } from '@psdte/shared';
 import {
   EventoBloqueoInput,
@@ -22,12 +22,16 @@ import { Dte } from '../../entities/dte.entity';
 import { DteXmlVersion } from '../../entities/dte-xml-version.entity';
 import { DteBloqueo } from '../../entities/dte-bloqueo.entity';
 import { DteEvento } from '../../entities/dte-evento.entity';
+import { DteTenencia } from '../../entities/dte-tenencia.entity';
 import { CatCausalBloqueo } from '../../entities/cat-causal-bloqueo.entity';
 import { Certificado } from '../../entities/certificado.entity';
 import { Firma } from '../../entities/firma.entity';
+import { Persona } from '../../entities/persona.entity';
 import { EventosService } from './eventos.service';
 import { EventosComunesService } from './eventos-comunes.service';
 import { extraerDetalleFirma } from './firma-xml.util';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { CODIGO_NOTIFICACION_BLOQUEO_APLICADO } from '../notificaciones/plantillas';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 const CODIGO_TIPO_EVENTO_BLOQUEO = 2;
@@ -52,8 +56,10 @@ export class BloqueoService {
     private readonly providerFactory: ProviderFactoryService,
     private readonly idDteService: IdDteService,
     private readonly eventosComunes: EventosComunesService,
+    private readonly notificacionesService: NotificacionesService,
     private readonly configService: ConfigService<EnvConfig, true>,
     @InjectRepository(CatCausalBloqueo) private readonly causalBloqueoRepo: Repository<CatCausalBloqueo>,
+    @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
   ) {}
 
   async registrarBloqueo(
@@ -90,7 +96,7 @@ export class BloqueoService {
       eventoInput,
     );
 
-    return this.dataSource.transaction(async (manager) => {
+    const resultado = await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT id FROM psdte.dte WHERE id = $1 FOR UPDATE', [dteId]);
 
       const { eventoId, estadoResultante } = await this.eventosService.aplicarEvento(manager, {
@@ -125,6 +131,23 @@ export class BloqueoService {
 
       return { eventoId, estadoActual: estadoResultante, bloqueoId: bloqueo.id };
     });
+
+    const tenenciaActual = await this.dataSource.getRepository(DteTenencia).findOne({ where: { dteId, hasta: IsNull() } });
+    if (tenenciaActual) {
+      const tenedor = await this.personaRepo.findOne({ where: { id: tenenciaActual.personaId } });
+      if (tenedor?.email) {
+        await this.notificacionesService.crear({
+          tipoCodigo: CODIGO_NOTIFICACION_BLOQUEO_APLICADO,
+          dteId,
+          eventoId: resultado.eventoId,
+          destinatarioPersonaId: tenedor.id,
+          destino: tenedor.email,
+          datosPlantilla: { idDte: dte.idDte, autoridad, causal: causal.nombre },
+        });
+      }
+    }
+
+    return resultado;
   }
 
   async levantarBloqueo(dteId: string, callerUsuarioId: string, bloqueoId: string, motivo: string): Promise<ResultadoLevantamiento> {

@@ -430,6 +430,60 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   (hoy se pega el texto PEM directamente). El resto de `apps/web` (dashboard, bandeja de DTE,
   wizards, etc.) es explícitamente F12.
 
+## F11 — Notificaciones, auditoría UI, incidencias
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa (MailHog real sustituido por `maildev` en este sandbox — ver "Pendiente")
+- **DoD ejecutado (docs/PLAN.md sección 13):** el catcher SMTP recibe los 6 tipos de email en un
+  solo flujo e2e (emitir → endosar → bloquear → levantar → pagar total → cancelar); la pantalla de
+  auditoría filtra por entidad/entidad-id/fecha y verifica la cadena de hashes (Playwright real).
+- **Hecho:**
+  - `NotificacionesModule`: `plantillas.ts` (7 tipos, texto plano: EMISION_CONFIRMADA,
+    ENDOSO_REGISTRADO, PAGO_REGISTRADO, BLOQUEO_APLICADO, DTE_CANCELADO, SOLICITUD_FIRMA,
+    VENCIMIENTO_PROXIMO), `NotificacionesService` (`crear` inserta `PENDIENTE`; `enviarPendientes`
+    envía por SMTP real vía `nodemailer` y transiciona a `ENVIADA`/`FALLIDA`),
+    `VencimientoNotificacionService` (detecta DTE a ≤7 días de vencer con saldo pendiente, no
+    re-notifica el mismo día), `NotificacionesController`
+    (`POST /admin/jobs/notificaciones`, `POST /admin/jobs/vencimientos-proximos`).
+  - Retrofit de creación de notificación en los 5 servicios de dominio existentes: `EmisionService`
+    (SOLICITUD_FIRMA en `solicitarFirmas`, EMISION_CONFIRMADA en `confirmar`), `EndosoService`,
+    `PagoService`, `BloqueoService` (solo `registrarBloqueo`, no en el levantamiento),
+    `CancelacionService`.
+  - `AuditoriaController` nuevo (`GET /admin/auditoria` con filtros, `GET
+    /admin/auditoria/verificar-cadena`) sobre el `AuditoriaService` ya existente desde F2 — ver
+    ADR-028. `IncidenciasModule` nuevo (`GET /admin/incidencias` con filtros,
+    `PUT /:id/estado`, `ADMIN_PSDTE` para escritura, `ADMIN_PSDTE`+`AUDITOR` para lectura).
+  - Migración `019_notificacion_error.sql` (`notificacion.error_mensaje`); seed
+    `06_evidencias_notificaciones.sql` ampliado de 5 a 7 `cat_tipo_notificacion` con
+    `canal='EMAIL'` correcto (antes `'SISTEMA'` para todos) — ver ADR-027. `SMTP_FROM` agregado a
+    `config.schema.ts`. `email` agregado a las personas demo `tenedor`/`deudor` sembradas (sin esto
+    ninguna notificación se genera nunca en los flujos demo).
+  - Frontend: `(privado)/auditoria/page.tsx` (filtros entidad/entidad-id/fecha, tabla, botón
+    "verificar cadena de hashes" con resultado válida/inválida) y `(privado)/incidencias/page.tsx`
+    (filtros estado/severidad, tabla, selector de cambio de estado solo para `ADMIN_PSDTE`) — rutas
+    exactas de la sección 8 del plan.
+  - Tests nuevos: `test/notificaciones/notificaciones.e2e-spec.ts` (2 casos: flujo completo de 6
+    tipos con envío SMTP real verificado contra la API REST de `maildev`, y vencimiento próximo con
+    no-duplicación el mismo día), `test/auditoria/auditoria.e2e-spec.ts` (4 casos: filtro por
+    entidad/entidad-id, filtro por rango de fechas, verificar-cadena válida, roles),
+    `test/incidencias/incidencias.e2e-spec.ts` (3 casos: listar/filtrar, permisos
+    AUDITOR-solo-lectura vs ADMIN_PSDTE, estado inválido rechazado),
+    `e2e/auditoria-incidencias.spec.ts` (3 casos Playwright, sesión compartida entre tests del
+    archivo para no agotar el límite de 5 intentos de login/60s — ver ADR-027/028).
+  - 12/12 API e2e suites (55 casos, incluye los 9 casos nuevos de F11) + 6/6 Playwright en verde.
+    `pnpm build/lint/typecheck` en verde en todo el monorepo (incluye `apps/web`).
+- **Decisiones registradas:** ADR-027 (`maildev` como sustituto de MailHog en el sandbox; catálogo
+  de notificaciones 5→7; interpretación del flujo e2e de "6 tipos"), ADR-028 (alcance del
+  tamper-test de auditoría dado el invariante I4 append-only; endpoints/pantallas de
+  auditoría/incidencias).
+- **Pendiente:** MailHog real (Docker) no se pudo levantar en este sandbox — `maildev` documentado
+  como sustituto solo de prueba, sin cambios en el código de producción (`NotificacionesService`
+  solo habla SMTP). Jobs de notificaciones/vencimientos siguen siendo invocación directa, no
+  cron/cola real — se retoma con `api-worker`/BullMQ en F13. Ninguna de las pantallas nuevas está
+  enlazada desde una navegación global todavía (no existe hasta F12). Editor visual de
+  claves/valores para JSON crudo (heredado de F10) y dashboard/bandeja/wizards de emisión siguen
+  siendo explícitamente F12.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -441,9 +495,13 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F11 (Notificaciones, auditoría UI, incidencias): siguiente fase autónoma a ejecutar — plantillas
-  de email (MailHog en dev) + pantallas de auditoría/incidencias con filtros.
-- Jobs de vencimiento/resellado/reconciliación siguen siendo invocación directa, no cron real —
-  ver "Pendiente" en F7/F9 (se retoman con `api-worker`/BullMQ en F13).
+- F12 (Frontend completo): siguiente fase autónoma a ejecutar — todas las páginas de la sección 8
+  (dashboard, bandeja de DTE, wizard de emisión, timeline, wizards de endoso/pago/bloqueo/
+  exportación), i18n es-PY, responsive, navegación global (las páginas de F10/F11 hoy se acceden
+  por URL directa, sin sidebar), Lighthouse a11y ≥ 90 en `/verificar` y `/login`.
+- Jobs de vencimiento/resellado/reconciliación/notificaciones siguen siendo invocación directa, no
+  cron real — ver "Pendiente" en F7/F9/F11 (se retoman con `api-worker`/BullMQ en F13).
 - `GET /dte` y `GET /dte/:id/xml?version=n` quedan pendientes — ver "Pendiente" en F8.
 - Conformidad PDF/A real (veraPDF) queda pendiente — ver "Pendiente" en F9.
+- MailHog real (Docker) no se pudo levantar en este sandbox — ver "Pendiente" en F11 (`maildev`
+  como sustituto de prueba, sin impacto en el código de producción).

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditoriaModule } from '../auditoria/auditoria.module';
 import { IntegracionesModule } from '../integraciones/integraciones.module';
+import { NotificacionesModule } from '../notificaciones/notificaciones.module';
 import { Persona } from '../../entities/persona.entity';
 import { PersonaDireccion } from '../../entities/persona-direccion.entity';
 import { CatPais } from '../../entities/cat-pais.entity';
@@ -20,7 +21,6 @@ import { DteXmlVersion } from '../../entities/dte-xml-version.entity';
 import { Certificado } from '../../entities/certificado.entity';
 import { Firma } from '../../entities/firma.entity';
 import { Evidencia } from '../../entities/evidencia.entity';
-import { Notificacion } from '../../entities/notificacion.entity';
 import { SolicitudFirma } from '../../entities/solicitud-firma.entity';
 import { IdDteService } from '../../common/id-dte/id-dte.service';
 import { BorradorEmisionStore } from './borrador-emision.store';
@@ -48,11 +48,11 @@ import { EmisionService } from './emision.service';
       Certificado,
       Firma,
       Evidencia,
-      Notificacion,
       SolicitudFirma,
     ]),
     AuditoriaModule,
     IntegracionesModule,
+    NotificacionesModule,
   ],
   controllers: [EmisionController],
   providers: [EmisionService, BorradorEmisionStore, IdDteService],

@@ -24,9 +24,12 @@ import { DtePago } from '../../entities/dte-pago.entity';
 import { DteEvento } from '../../entities/dte-evento.entity';
 import { Certificado } from '../../entities/certificado.entity';
 import { Firma } from '../../entities/firma.entity';
+import { Persona } from '../../entities/persona.entity';
 import { EventosService } from './eventos.service';
 import { EventosComunesService } from './eventos-comunes.service';
 import { extraerDetalleFirma } from './firma-xml.util';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { CODIGO_NOTIFICACION_PAGO_REGISTRADO } from '../notificaciones/plantillas';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 const CODIGO_TIPO_EVENTO_PAGO = 4;
@@ -48,8 +51,10 @@ export class PagoService {
     private readonly providerFactory: ProviderFactoryService,
     private readonly idDteService: IdDteService,
     private readonly eventosComunes: EventosComunesService,
+    private readonly notificacionesService: NotificacionesService,
     private readonly configService: ConfigService<EnvConfig, true>,
     @InjectRepository(DtePago) private readonly dtePagoRepo: Repository<DtePago>,
+    @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
   ) {}
 
   async registrarPago(
@@ -139,7 +144,7 @@ export class PagoService {
     const hashEvento = sha256Hex(canonicalizarExclusivo(nodoEventoFinal));
     const hashVigente = sha256Hex(canonicalizarExclusivo(documentoFinal.documentElement));
 
-    return this.dataSource.transaction(async (manager) => {
+    const resultado = await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT id FROM psdte.dte WHERE id = $1 FOR UPDATE', [dteId]);
 
       const tenenciaActual = await manager
@@ -227,5 +232,19 @@ export class PagoService {
 
       return { eventoId, estadoActual: estadoResultante, numeroPago: numeroPagoSiguiente, saldoPendiente: String(saldoNuevo) };
     });
+
+    const tenedor = await this.personaRepo.findOne({ where: { id: callerPersonaId } });
+    if (tenedor?.email) {
+      await this.notificacionesService.crear({
+        tipoCodigo: CODIGO_NOTIFICACION_PAGO_REGISTRADO,
+        dteId,
+        eventoId: resultado.eventoId,
+        destinatarioPersonaId: tenedor.id,
+        destino: tenedor.email,
+        datosPlantilla: { idDte: dte.idDte, montoPagado: String(montoPagado), saldoPendiente: String(saldoNuevo) },
+      });
+    }
+
+    return resultado;
   }
 }

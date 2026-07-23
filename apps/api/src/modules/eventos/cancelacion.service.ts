@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, IsNull } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { ErrorDominio } from '@psdte/shared';
 import {
   EventoCancelacionInput,
@@ -22,9 +23,12 @@ import { DteCancelacion } from '../../entities/dte-cancelacion.entity';
 import { DteEvento } from '../../entities/dte-evento.entity';
 import { Certificado } from '../../entities/certificado.entity';
 import { Firma } from '../../entities/firma.entity';
+import { Persona } from '../../entities/persona.entity';
 import { EventosService } from './eventos.service';
 import { EventosComunesService } from './eventos-comunes.service';
 import { extraerDetalleFirma } from './firma-xml.util';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { CODIGO_NOTIFICACION_DTE_CANCELADO } from '../notificaciones/plantillas';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 const CODIGO_TIPO_EVENTO_CANCELACION = 1;
@@ -48,7 +52,9 @@ export class CancelacionService {
     private readonly providerFactory: ProviderFactoryService,
     private readonly idDteService: IdDteService,
     private readonly eventosComunes: EventosComunesService,
+    private readonly notificacionesService: NotificacionesService,
     private readonly configService: ConfigService<EnvConfig, true>,
+    @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
   ) {}
 
   async cancelar(dteId: string, callerUsuarioId: string, callerPersonaId: string, motivo: string): Promise<ResultadoCancelacion> {
@@ -111,7 +117,7 @@ export class CancelacionService {
 
     const hashVigente = sha256Hex(canonicalizarExclusivo(documentoFinal.documentElement));
 
-    return this.dataSource.transaction(async (manager) => {
+    const resultado = await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT id FROM psdte.dte WHERE id = $1 FOR UPDATE', [dteId]);
 
       const tenenciaActual = await manager
@@ -187,5 +193,19 @@ export class CancelacionService {
 
       return { eventoId, estadoActual: estadoResultante };
     });
+
+    const tenedor = await this.personaRepo.findOne({ where: { id: callerPersonaId } });
+    if (tenedor?.email) {
+      await this.notificacionesService.crear({
+        tipoCodigo: CODIGO_NOTIFICACION_DTE_CANCELADO,
+        dteId,
+        eventoId: resultado.eventoId,
+        destinatarioPersonaId: tenedor.id,
+        destino: tenedor.email,
+        datosPlantilla: { idDte: dte.idDte, motivo },
+      });
+    }
+
+    return resultado;
   }
 }

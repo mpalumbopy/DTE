@@ -21,6 +21,8 @@ import { EmisionModule } from './modules/emision/emision.module';
 import { EventosModule } from './modules/eventos/eventos.module';
 import { VerificacionModule } from './modules/verificacion/verificacion.module';
 import { ExportacionModule } from './modules/exportacion/exportacion.module';
+import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
+import { IncidenciasModule } from './modules/incidencias/incidencias.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CatalogoErrorService } from './common/filters/catalogo-error.service';
 import { CatalogoErrorFilter } from './common/filters/catalogo-error.filter';
@@ -61,6 +63,8 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     EventosModule,
     VerificacionModule,
     ExportacionModule,
+    NotificacionesModule,
+    IncidenciasModule,
   ],
   controllers: [AppController],
   providers: [

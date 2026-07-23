@@ -627,3 +627,103 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
 - **Alternativas descartadas:** permitir que `PUT` cambie a REAL y mover el candado a un middleware
   que inspeccione el body — descartado por ser más frágil (fácil de rodear agregando otro campo) que
   simplemente prohibir la transición en el único lugar que persiste `modo`.
+
+## ADR-027 — F11: `maildev` como sustituto de MailHog en el sandbox; catálogo de notificaciones 5→7; alcance del flujo e2e
+
+- **Fecha:** 2026-07-23
+- **Fase:** F11
+- **Contexto:** el DoD de F11 pide "MailHog recibe los 6 tipos en el flujo e2e". Este entorno no
+  tiene Docker (`docker ps` no encuentra el socket), así que `infra/dev/docker-compose.yml` (que
+  sí levanta MailHog real en dev/CI) no puede usarse aquí. El proxy saliente del sandbox tampoco
+  permite descargar el binario oficial de MailHog desde GitHub (403 — solo están permitidos
+  registry.npmjs.org, PyPI, crates.io, el proxy de Go y dominios de Anthropic).
+- **Decisión:**
+  - Se instaló `maildev` (paquete npm, servidor SMTP+API REST puro Node, protocolo de recepción
+    idéntico al que usa MailHog) como sustituto **solo para este sandbox** — no reemplaza el
+    MailHog real de `docker-compose.yml`, que sigue siendo el servicio de dev/CI documentado. Se
+    deja constancia explícita: si se corre este mismo e2e contra un entorno con Docker, apuntar
+    `SMTP_HOST/PORT` al MailHog de `docker-compose.yml` funciona sin cambiar una línea de código de
+    producción (el `NotificacionesService` solo habla SMTP vía `nodemailer`, agnóstico del
+    catcher).
+  - `maildev` bindea por defecto a `::` (IPv6 any-address) y este sandbox no soporta sockets IPv6 —
+    se corrige con `--ip 127.0.0.1 --web-ip 127.0.0.1` explícito al arrancarlo.
+  - `NotificacionesService.crear()` inserta la fila `PENDIENTE` de forma síncrona en el mismo punto
+    del evento de dominio (emisión, solicitud de firma, endoso, pago, bloqueo, cancelación);
+    `enviarPendientes()` es un job invocable (`POST /admin/jobs/notificaciones`) que efectivamente
+    envía por SMTP — mismo patrón "job invocable, no cron/cola real" ya usado en F7/F9, porque
+    `api-worker`/BullMQ todavía no existen (se retoma en F13).
+  - `cat_tipo_notificacion` se amplió de 5 a 7 códigos: los 5 originales tenían `canal='SISTEMA'`
+    para todos (nunca se habían usado para enviar email de verdad); F11 necesita `canal='EMAIL'`
+    en los 6 tipos que sí generan correo, más el 7º (`VENCIMIENTO_PROXIMO`, que no existía). El
+    seed de este catálogo pasó de `ON CONFLICT DO NOTHING` a `ON CONFLICT DO UPDATE` — única
+    excepción al patrón "seed una vez, nunca tocar" del resto del catálogo, justificada porque los
+    valores originales (`canal`, `requiere_acuse`) estaban mal y una base ya sembrada necesita
+    corregirse al re-sembrar.
+  - Las personas demo `tenedor`/`deudor` (seed `run-seeds.ts`) no tenían `email` en su fila
+    `persona` (solo el `usuario.email` de login) — sin esto, ninguna notificación se genera nunca
+    en los flujos demo/e2e porque `Notificacion.crear()` se salta el envío cuando `persona.email`
+    es null. Se agregó `email` a la fila `persona` sembrada (mismo valor que el `usuario.email`
+    correspondiente) — refleja que `persona` es la parte legal/natural (puede no tener cuenta de
+    sistema), y para las demo tiene sentido que coincida.
+  - **Interpretación del "6 tipos en el flujo e2e"**: se construyó un solo ciclo de vida (emitir →
+    endosar → bloquear → levantar → pagar total → cancelar) que dispara, en orden,
+    `SOLICITUD_FIRMA`, `EMISION_CONFIRMADA`, `ENDOSO_REGISTRADO`, `BLOQUEO_APLICADO`,
+    `PAGO_REGISTRADO`, `DTE_CANCELADO` — los 6 tipos mencionados en la descripción de fase. El 7º
+    catálogo (`VENCIMIENTO_PROXIMO`) no ocurre naturalmente el mismo día en un flujo realista (es
+    inherentemente temporal), así que se probó aparte invocando
+    `POST /admin/jobs/vencimientos-proximos` directamente sobre un DTE insertado con vencimiento
+    dentro de la ventana de antelación (también se verificó que no re-notifica el mismo día).
+  - La notificación `SOLICITUD_FIRMA` se crea antes de que exista el DTE (el borrador de datos
+    generales todavía no se confirmó), así que su fila de `notificacion` no lleva `dte_id` — el
+    test la identifica por el `idDte` que aparece en el `asunto` (todas las plantillas lo incluyen).
+- **Alternativas descartadas:**
+  - Instalar MailHog vía Docker — descartado, no hay daemon Docker en el sandbox.
+  - Descargar el binario oficial de MailHog directamente — descartado, el proxy bloquea GitHub.
+  - Dejar `canal='SISTEMA'` sin corregir y agregar los 2 tipos nuevos con `ON CONFLICT DO NOTHING`
+    — descartado porque una base ya sembrada (como la de este sandbox, sembrada en F1) quedaría con
+    los 5 tipos originales mal etiquetados para siempre.
+
+## ADR-028 — F11: pantallas de auditoría/incidencias; alcance del "tamper-test" dado el invariante I4
+
+- **Fecha:** 2026-07-23
+- **Fase:** F11
+- **Contexto:** el DoD de F11 pide que la pantalla de auditoría "verifique cadena". `auditoria_log`
+  tiene el trigger `trg_auditoria_append_only` (F1/I4) que rechaza `UPDATE`/`DELETE` a nivel de
+  base de datos — por diseño, no es posible corromper una fila ya escrita, ni siquiera para un
+  test. Forzar un "tamper" real contra la tabla compartida (usada por todos los demás e2e que
+  corren en paralelo) sería además irreversible y rompería la cadena para cualquier corrida
+  posterior.
+- **Decisión:**
+  - `AuditoriaService.verificarCadena()` recorre `auditoria_log` en lotes de 500 ordenados por
+    `id ASC`, recalculando el hash esperado de cada fila desde sus propios campos almacenados
+    (mismo objeto que `registrar()` hashea al insertar) encadenado contra el hash de la fila
+    anterior — nunca confía en el hash guardado sin recalcularlo (mismo patrón "recalcular, no
+    confiar" usado en los verificadores de F8/F9).
+  - El test e2e (`test/auditoria/auditoria.e2e-spec.ts`) verifica `valida:true` sobre la cadena
+    real (que, por construcción vía el trigger, nunca puede estar corrompida) en vez de fabricar un
+    tamper. La imposibilidad de corromper una fila **es** la garantía que pide I4; no hace falta
+    demostrarla rompiendo datos compartidos para probar que el chequeo funciona — el propio
+    trigger, ya cubierto por la migración 013, es la prueba de que un tamper real no puede ocurrir.
+  - `AuditoriaController` (`GET /admin/auditoria` con filtros `entidad/entidadId/desde/hasta/after/
+    limit`, `GET /admin/auditoria/verificar-cadena`) no existía como controller hasta F11 —
+    `AuditoriaService.registrar()`/`AuditoriaInterceptor` ya llevaban desde F2, pero nada exponía
+    lectura por HTTP. Roles de clase `ADMIN_PSDTE, AUDITOR` (ambos endpoints son de solo lectura,
+    no hace falta diferenciar a nivel de método).
+  - `IncidenciasController` (`GET /admin/incidencias` con filtros, `PUT /:id/estado`) es nuevo — el
+    único escritor de `incidencia` sigue siendo `ReconciliacionService` (F9); no existe (ni el plan
+    lo pide) un endpoint para crear incidencias manualmente. Roles de clase `ADMIN_PSDTE, AUDITOR`
+    para lectura, override de método `ADMIN_PSDTE` en el `PUT` (confirma la semántica de
+    `Reflector.getAllAndOverride`: el decorator de método gana sobre el de clase).
+  - Frontend: `(privado)/auditoria/page.tsx` y `(privado)/incidencias/page.tsx` (rutas exactas de
+    la sección 8 del plan) — filtros por entidad/entidad-id/fecha y botón "verificar cadena" en
+    auditoría; filtros por estado/severidad y selector de cambio de estado (solo visible para
+    `ADMIN_PSDTE`) en incidencias. Ninguna de las dos está enlazada desde una barra de navegación
+    todavía porque esa navegación global no existe aún (se arma en F12); se accede por URL directa,
+    mismo criterio que F10 usó para `/admin/integraciones`.
+- **Alternativas descartadas:**
+  - Forzar un tamper real vía `UPDATE psdte.auditoria_log SET hash_registro = ...` para demostrar
+    `valida:false` — descartado: el trigger lo rechaza (no se puede) y, aunque se pudiera, sería
+    destructivo contra una tabla que comparten todos los demás tests del monorepo.
+  - Exponer un endpoint de creación manual de incidencias — descartado, fuera del alcance que pide
+    el plan (las incidencias son siempre subproducto de un job, nunca una acción manual de un
+    operador).

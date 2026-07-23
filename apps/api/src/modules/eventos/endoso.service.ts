@@ -29,6 +29,8 @@ import { Firma } from '../../entities/firma.entity';
 import { EventosService } from './eventos.service';
 import { EventosComunesService } from './eventos-comunes.service';
 import { extraerDetalleFirma } from './firma-xml.util';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
+import { CODIGO_NOTIFICACION_ENDOSO_REGISTRADO } from '../notificaciones/plantillas';
 
 const DS_NS = 'http://www.w3.org/2000/09/xmldsig#';
 const CODIGO_TIPO_EVENTO_ENDOSO = 3;
@@ -47,6 +49,7 @@ export class EndosoService {
     private readonly providerFactory: ProviderFactoryService,
     private readonly idDteService: IdDteService,
     private readonly eventosComunes: EventosComunesService,
+    private readonly notificacionesService: NotificacionesService,
     private readonly configService: ConfigService<EnvConfig, true>,
     @InjectRepository(Persona) private readonly personaRepo: Repository<Persona>,
   ) {}
@@ -162,7 +165,7 @@ export class EndosoService {
     const hashVigente = sha256Hex(canonicalizarExclusivo(documentoFinal.documentElement));
     const textoEndoso = construirTextoEndoso(eventoInput.endosatario);
 
-    return this.dataSource.transaction(async (manager) => {
+    const resultado = await this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT id FROM psdte.dte WHERE id = $1 FOR UPDATE', [dteId]);
 
       const tenenciaActual = await manager
@@ -261,5 +264,18 @@ export class EndosoService {
 
       return { eventoId, estadoActual: estadoResultante, numeroEndoso: numeroEndosoSiguiente };
     });
+
+    if (endosatarioPersona.email) {
+      await this.notificacionesService.crear({
+        tipoCodigo: CODIGO_NOTIFICACION_ENDOSO_REGISTRADO,
+        dteId,
+        eventoId: resultado.eventoId,
+        destinatarioPersonaId: endosatarioPersona.id,
+        destino: endosatarioPersona.email,
+        datosPlantilla: { idDte: dte.idDte, nombreEndosatario: nombreEndosatario, numeroEndoso: numeroEndosoSiguiente },
+      });
+    }
+
+    return resultado;
   }
 }

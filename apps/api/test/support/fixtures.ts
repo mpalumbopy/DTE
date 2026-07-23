@@ -14,11 +14,12 @@ export async function crearPersona(
   client: Client,
   nombresApellidos: string,
   numeroDocumento: string,
+  email: string | null = null,
 ): Promise<string> {
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO psdte.persona (tipo_persona, nombres_apellidos, tipo_documento, numero_documento, pais_documento)
-     VALUES (1, $1, 1, $2, 600) RETURNING id`,
-    [nombresApellidos, numeroDocumento],
+    `INSERT INTO psdte.persona (tipo_persona, nombres_apellidos, tipo_documento, numero_documento, pais_documento, email)
+     VALUES (1, $1, 1, $2, 600, $3) RETURNING id`,
+    [nombresApellidos, numeroDocumento, email],
   );
   return rows[0].id;
 }
