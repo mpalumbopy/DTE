@@ -917,3 +917,60 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
     este chequeo puntual, cuando `kubernetes-validate` ya cubre la validación de esquema real con
     una dependencia mucho más liviana (PyPI, ya usado en otras fases del proyecto para chequeos
     similares).
+
+## ADR-032 — F14: `pnpm audit` — 28/50 hallazgos corregidos vía overrides/bumps seguros; `next`/`@nestjs/core` documentados como excepción
+
+- **Fecha:** 2026-07-23
+- **Fase:** F14
+- **Contexto:** el DoD de F14 pide "`pnpm audit` limpio (o excepciones documentadas)" — el plan
+  mismo anticipa que no todo hallazgo es corregible sin riesgo. `pnpm audit --prod` reportó 50
+  vulnerabilidades (19 high, 27 moderate, 4 low) contra los 9 paquetes en el árbol de dependencias
+  de producción: `next`, `nodemailer`, `multer`, `lodash`, `@nestjs/core`, `js-yaml`, `postcss`,
+  `qs`, `uuid`, `file-type`, `adm-zip`, `glob`, `body-parser`.
+- **Decisión — corregido (28 hallazgos):**
+  - `nodemailer`: `^6.9.16` → `^9.0.3` (el único hallazgo que probadamente afectaba a nuestra
+    versión resuelta, `6.10.1`, era el DoS recursivo de `addressparser`, rango vulnerable
+    `>=3.0.0 <=7.0.10` — los demás hallazgos de nodemailer requerían `>=7.x`/`>=8.x`/`>=9.x`, fuera
+    del rango que 6.10.1 ocupa). Se saltó directo a la última versión estable (9.0.3, cubre todos
+    los hallazgos de una vez) en vez de una parada intermedia en 7.x: el uso real en
+    `NotificacionesService` es mínimo (`createTransport({host,port,secure,auth,tls})` +
+    `sendMail({from,to,subject,text})`, sin `raw`/`envelope`/opciones avanzadas), un patrón estable
+    entre majors de nodemailer. Verificado con la suite completa de e2e de API (15/15 suites, 66
+    casos) tras el bump — sin regresión.
+  - `pnpm.overrides` (raíz de `package.json`) para 9 dependencias transitivas alcanzables desde
+    producción, cada una fijada a la primera versión patcheada dentro de su MISMA línea mayor (sin
+    saltar de major, ya que ninguno de estos paquetes es una dependencia directa nuestra — el
+    override solo fuerza la resolución, no cambia ninguna API que usemos):
+    `lodash@^4.18.0` (vía `@nestjs/config`), `js-yaml@^4.3.0` (vía `@nestjs/swagger`),
+    `postcss@^8.5.12` (vía `next`), `qs@^6.15.2` y `file-type@^21.3.2` (vía `@nestjs/bullmq`),
+    `uuid@^11.1.1` (vía `@nestjs/typeorm`→`typeorm`), `adm-zip@^0.6.0` (vía `@psdte/xml-engine`,
+    usado directo para `construirZip` en exportación), `glob@^11.1.0` (vía `@nestjs/typeorm`),
+    `multer@^2.2.0` (vía `@nestjs/platform-express`, peer de `@nestjs/core` — el multipart-upload
+    de NestJS), `body-parser@^1.20.6` (vía `express`, bundleado en `@nestjs/platform-express`).
+    Verificado: `pnpm build/lint/typecheck` en los 7 paquetes, rebuild limpio de `apps/web` (mismo
+    tamaño de bundle, el pipeline de Tailwind/PostCSS no cambió de salida), 15/15 suites e2e de API
+    y 22/22 Playwright reverificados después de aplicar los overrides.
+- **Decisión — excepción documentada (22 hallazgos restantes, `next` y `@nestjs/core`):**
+  - `next@14.2.35` — 19 hallazgos (8 high, 9 moderate, 2 low) requieren `>=15.0.8` hasta
+    `>=15.5.21` según el hallazgo. Next.js 14→15 es un salto de versión MAYOR del framework
+    (App Router, cambios en `next/image`, Server Actions, middleware) que puede tener breaking
+    changes silenciosos en cualquiera de las ~20 rutas de `apps/web`. Forzarlo dentro de F14 sin un
+    ciclo de regresión dedicado (que exigiría reverificar manualmente cada wizard, no solo confiar
+    en que Playwright cubre cada posible cambio de comportamiento) contradice la instrucción de no
+    degradar/arriesgar funcionalidad ya probada para "limpiar" una auditoría. La mayoría de los
+    hallazgos de `next` además son DoS/SSRF en superficies que no usamos activamente en esta
+    versión del producto (Server Actions custom, `next/image` remotePatterns, WebSocket upgrades) —
+    mitigan riesgo real pero no son explotables tal como está desplegado hoy.
+  - `@nestjs/core@10.4.22` — 1 hallazgo moderado requiere `>=11.1.18`. NestJS 10→11 es igualmente
+    un salto mayor que arrastra los ~10 paquetes `@nestjs/*` del monorepo (bullmq, config, jwt,
+    platform-express, swagger, throttler, typeorm, testing) simultáneamente — no se puede subir
+    `@nestjs/core` solo sin romper peer dependencies del resto.
+  - Ambos quedan como upgrade de major dedicado, con su propio ciclo de prueba manual en el
+    navegador (no solo `pnpm test`), fuera del alcance de "endurecimiento" de F14 — se documenta
+    acá en vez de forzarlo bajo presión de tiempo.
+- **Alternativas descartadas:**
+  - Forzar `next`/`@nestjs/core` a la versión mayor patcheada vía `pnpm.overrides` sin migrar el
+    código — descartado: un override de versión mayor sin adaptar el código que depende de ella
+    (breaking changes de API, no solo de seguridad) es exactamente el tipo de "arreglo" que rompe
+    en producción de forma silenciosa; el override solo es seguro para dependencias TRANSITIVAS
+    donde nosotros no llamamos directamente a su API.
