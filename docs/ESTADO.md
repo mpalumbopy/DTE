@@ -621,6 +621,61 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   - Conformidad PDF/A real (veraPDF, F9) y MailHog real vía Docker (F11) siguen pendientes por las
     mismas razones de sandbox ya documentadas en esas fases.
 
+## F14 — Endurecimiento y cierre
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa (con limitaciones de sandbox honestamente documentadas, ver más abajo)
+- **DoD ejecutado:**
+  - `pnpm audit --prod`: de 50 hallazgos (19 high, 27 moderate, 4 low) se corrigieron 28 —
+    `nodemailer` `6.9.16→9.0.3` (única versión con un hallazgo real aplicable) y `pnpm.overrides`
+    para 9 transitivas (`lodash`, `js-yaml`, `postcss`, `qs`, `uuid`, `file-type`, `adm-zip`,
+    `glob`, `multer`, `body-parser`), cada una dentro de su misma línea mayor. Quedan 22 hallazgos
+    en `next@14` y `@nestjs/core@10` — ambos requieren un salto de versión MAYOR del framework
+    (breaking changes potenciales en ~20 rutas de `apps/web` o en los ~10 paquetes `@nestjs/*` del
+    monorepo) — documentados como excepción explícita en ADR-032 en vez de forzados bajo presión de
+    tiempo. Reverificado tras los bumps aplicados: build/lint/typecheck en los 7 paquetes, 15/15
+    suites e2e API (66 casos), 22/22 Playwright — sin regresión.
+  - Invariante I10 (idempotencia por `Idempotency-Key`): **no tenía ninguna implementación** en
+    ninguna fase anterior pese a ser uno de los 10 invariantes no-negociables desde `CLAUDE.md`/F0
+    — se descubrió al preparar el test dedicado y se cerró acá con `IdempotenciaInterceptor`
+    (global, opt-in por header, Redis `SET NX`, cache de respuesta 24h, 409 ante una carrera con la
+    misma clave). Ver ADR-033.
+  - `apps/api/test/invariantes/invariantes.e2e-spec.ts` (nuevo): un test dedicado por invariante
+    I1-I10 (10/10 verde), consolidando la verificación al cierre del proyecto — I1 e I9 incluyen
+    además un barrido estático del código fuente (sin `DELETE FROM psdte.dte`, sin campos de clave
+    privada de firmante).
+  - OpenAPI exportada: `apps/api/scripts/exportar-openapi.ts` (`pnpm --filter @psdte/api
+    docs:openapi`) genera `docs/openapi.json` y `docs/API.md` (agrupado por segmento de ruta, ya
+    que ningún controller usa `@ApiTags` todavía — nota explícita en el propio `API.md`).
+  - Re-ejecución completa de los DoD F0-F13 en este sandbox: `pnpm build/lint/typecheck` (7
+    paquetes) verdes; `pnpm test:cov` (9 tareas) verde; `pnpm --filter @psdte/api test:e2e` 16/16
+    suites (76 casos); `pnpm --filter @psdte/web test:e2e` (Playwright) 22/22; validación de
+    manifests K8s (`kubernetes-validate`) sin cambios desde F13. Adicionalmente, desde una base de
+    datos reseteada (`pnpm db:reset`, migraciones+seeds desde cero) se levantó `pnpm dev` (api+web
+    nativos, sin Docker) y se verificó manualmente el sistema operable de punta a punta: `/api/
+    healthz` y `/api/readyz` (BD+Redis+integraciones) en verde, `POST /api/v1/auth/login` emite un
+    token real contra un usuario demo recién sembrado, `/login` y `/verificar/<código>` (SSR
+    pública) responden 200 con el contenido esperado.
+  - `docs/ESTADO.md` y `docs/DECISIONES.md`: completos (esta entrada cierra F14; ADR-032/ADR-033
+    documentan las decisiones de esta fase).
+- **Decisiones registradas:** ADR-032 (`pnpm audit`: 28 hallazgos corregidos, `next`/`@nestjs/core`
+  documentados como excepción), ADR-033 (invariante I10 sin implementar hasta ahora,
+  `IdempotenciaInterceptor`, test consolidado I1-I10).
+- **Pendiente (honestamente documentado, no se fuerza bajo presión de tiempo):**
+  - `next@14→15` y `@nestjs/core@10→11`: 22 hallazgos de `pnpm audit` que requieren un upgrade de
+    versión mayor del framework, con su propio ciclo de regresión manual — ver ADR-032.
+  - `docker compose up -d`, `kind create cluster` y `scripts/smoke-k8s.sh` contra un cluster real
+    no se pudieron ejecutar en este sandbox (sin Docker daemon) — el DoD final se reverificó con
+    los servicios nativos de Postgres/Redis del sandbox en su lugar (ver arriba), consistente con
+    el patrón de todo el proyecto (ADR-002 y siguientes).
+  - Ningún controller usa `@ApiOperation`/`@ApiResponse`/`@ApiTags` — `docs/API.md` se genera con
+    categorías inferidas de la ruta y sin descripciones de respuesta más allá del código HTTP.
+    Pulido de documentación pendiente, no bloqueante.
+  - Los pendientes ya documentados en F7/F9/F11/F13 (job de transición VENCIDO, PDF/A real vía
+    veraPDF, MailHog real vía Docker, jobs "firmas-pendientes"/"exportaciones" como cola async)
+    siguen igual — F14 no los retoma, son gaps de alcance ya evaluados y honestamente diferidos en
+    sus fases correspondientes.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -632,17 +687,24 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F14 (Endurecimiento y cierre): siguiente fase autónoma a ejecutar — última del plan.
-- El job "vencimientos" (transición VENCIDO vía `fn_aplicar_evento`) sigue pendiente — ver
-  "Pendiente" en F13 (requiere catálogo nuevo + soporte en xml-engine, fuera de alcance de una
-  fase de infraestructura).
+Las 15 fases del plan (F0–F14) están completas. Lo que sigue no es "próxima fase" sino deuda
+honestamente diferida a lo largo del proyecto, a retomar cuando haya infraestructura real
+disponible (Docker, WS reales) o se decida invertir en ella:
+
+- `next@14→15` y `@nestjs/core@10→11`: upgrades de versión mayor pendientes de `pnpm audit` (22
+  hallazgos) — requieren su propio ciclo de regresión manual, no una fase automática. Ver ADR-032.
+- El job "vencimientos" (transición VENCIDO vía `fn_aplicar_evento`) sigue pendiente — requiere
+  catálogo nuevo + soporte en xml-engine. Ver ADR-030.
 - El job "firmas-pendientes" (poll de proveedores de firma sin callback) sigue pendiente — no hay
   nada real que probar hasta que exista un proveedor REAL sin callback.
 - Conformidad PDF/A real (veraPDF) queda pendiente — ver "Pendiente" en F9.
 - MailHog real (Docker) no se pudo levantar en este sandbox — ver "Pendiente" en F11 (`maildev`
   como sustituto de prueba, sin impacto en el código de producción).
 - `docker build`/`kind`/`kubectl apply` contra un cluster real no se pudieron ejecutar en este
-  sandbox — ver "Pendiente" en F13 y `docs/RUNBOOK.md` sección 7.
+  sandbox — ver "Pendiente" en F13/F14 y `docs/RUNBOOK.md` sección 7. Antes de operar en un cluster
+  real: `kustomize build` de cada overlay + `kubeconform -strict` real + `scripts/smoke-k8s.sh`.
+- Ningún controller usa `@ApiOperation`/`@ApiResponse`/`@ApiTags` — `docs/API.md` queda con
+  categorías inferidas de la ruta en vez de una taxonomía explícita. Pulido, no bloqueante.
 - Editor visual de tabla clave/valor para JSON crudo en `admin/integraciones` (F10) y posible
   editor visual similar para `admin/parametros`/`admin/catalogos` (F12) — pulido de UI, no
   bloqueante de ningún DoD.
