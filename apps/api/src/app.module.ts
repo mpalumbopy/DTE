@@ -24,6 +24,7 @@ import { VerificacionModule } from './modules/verificacion/verificacion.module';
 import { ExportacionModule } from './modules/exportacion/exportacion.module';
 import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 import { IncidenciasModule } from './modules/incidencias/incidencias.module';
+import { DevModule } from './modules/dev/dev.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CatalogoErrorService } from './common/filters/catalogo-error.service';
 import { CatalogoErrorFilter } from './common/filters/catalogo-error.filter';
@@ -67,6 +68,7 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     ExportacionModule,
     NotificacionesModule,
     IncidenciasModule,
+    DevModule,
   ],
   controllers: [AppController],
   providers: [
