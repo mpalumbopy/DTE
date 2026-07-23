@@ -7,3 +7,4 @@ export * from './monto-letras';
 export * from './builder';
 export * from './parser';
 export * from './validator';
+export * from './contenedor';

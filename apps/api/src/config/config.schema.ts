@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { z } from 'zod';
 
@@ -15,6 +16,24 @@ function rutaXsdPorDefecto(): string {
   return join(dirname(pkgJson), 'schema', 'pagare-dte.provisional.xsd');
 }
 
+/** Busca un Chromium ya instalado (p. ej. el que gestiona Playwright vía `PLAYWRIGHT_BROWSERS_PATH`
+ * en este entorno) antes de asumir que el binario está en PATH — evita depender de descargarlo. */
+function rutaChromiumPorDefecto(): string {
+  const base = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (base && existsSync(base)) {
+    const revision = readdirSync(base).find((n) => n.startsWith('chromium-'));
+    if (revision) {
+      const candidato = join(base, revision, 'chrome-linux', 'chrome');
+      if (existsSync(candidato)) return candidato;
+    }
+  }
+  return 'chromium';
+}
+
+function rutaExportacionesPorDefecto(): string {
+  return join(process.cwd(), 'var', 'exportaciones');
+}
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -28,6 +47,9 @@ export const envSchema = z.object({
   ALLOW_SIMULATOR: boolFromString.default(true),
   PROCESS_ROLE: z.enum(['api', 'worker']).default('api'),
   XSD_PATH: z.string().default(rutaXsdPorDefecto()),
+  EXPORT_DIR: z.string().default(rutaExportacionesPorDefecto()),
+  CHROMIUM_PATH: z.string().default(rutaChromiumPorDefecto()),
+  GHOSTSCRIPT_PATH: z.string().default('gs'),
   SEED_DEMO: boolFromString.default(false),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().default(''),
   SMTP_HOST: z.string().optional().default('localhost'),

@@ -354,6 +354,45 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   no forman parte del DoD literal de F8 (que es específicamente sobre verificación de integridad),
   se retoman cuando F12 (frontend) los necesite para las pantallas de bandeja/detalle.
 
+## F9 — Exportación y preservación
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa (conformidad PDF/A vía veraPDF real queda pendiente — ver "Pendiente")
+- **DoD ejecutado (docs/PLAN.md sección 13):** e2e contenedor generado se verifica offline OK (vía
+  la función Y vía la CLI `pnpm verificar` real); alterar un artefacto o el manifiesto → detectado;
+  PDF/A real generado (Puppeteer + Ghostscript) con chequeo de conformidad persistido; job de
+  resellado agrega un token nuevo a `resellado_ltv`.
+- **Hecho:**
+  - `packages/xml-engine/src/contenedor/` (`construirManifiesto`, `construirZip`,
+    `verificarContenedorOffline`) + `src/cli/verificar.ts` (`pnpm verificar <contenedor.zip>`, sin
+    red ni BD). El manifiesto se sella con un token TSA (RFC 3161) reusando
+    `TsaProviderPort.sellarHash` — ver ADR-025.
+  - Entidades nuevas: `Exportacion`, `ReselladoLtv`, `Incidencia` (tablas ya existían desde F1).
+  - `ExportacionService`: `generarContenedor` (dte.xml + evidencias + certificados + manifiesto +
+    sello TSA), `generarPdfA` (HTML → Puppeteer → PDF → Ghostscript `-dPDFA=2` → PDF/A-2b real,
+    conformidad verificada por `VerificadorPdfaEstructural` — simulador estructural, no veraPDF, ver
+    ADR-025), ambas persisten en `exportacion` y guardan el archivo en `EXPORT_DIR`.
+  - `ReselladoService.reselladoVencidos`: resella toda `dte_xml_version` sin resellado vigente.
+  - `ReconciliacionService.reconciliarDte`: recalcula hash + compara id/monto del XML vigente contra
+    la proyección en `dte`; discrepancia → `incidencia` severidad ALTA (I8).
+  - `ExportacionController`/`ExportacionModule`: `POST /dte/:id/exportacion`,
+    `GET /exportaciones/:id/descargar`, `POST /admin/jobs/resellado-ltv`,
+    `GET /admin/jobs/reconciliacion` (jobs invocables directamente — sin cola/cron todavía, mismo
+    motivo que el cron de vencimientos de F7).
+  - Nuevas config vars: `EXPORT_DIR`, `CHROMIUM_PATH` (autodetecta el Chromium de Playwright si
+    existe), `GHOSTSCRIPT_PATH`.
+  - Test unitario (`packages/xml-engine/src/contenedor/contenedor.spec.ts`, 2 casos) + e2e nuevo
+    (`test/exportacion/exportacion.e2e-spec.ts`, 5 casos). 40/40 e2e del monorepo en verde junto con
+    F1-F8.
+  - `pnpm build/lint/typecheck` en verde en todo el monorepo.
+- **Decisiones registradas:** ADR-025 (sello del manifiesto vía TSA en vez de XAdES; PDF/A real con
+  conformidad simulada en vez de veraPDF).
+- **Pendiente:** conformidad PDF/A real vía veraPDF (Java, instalación no interactiva pesada —
+  costo/beneficio no favorable dado el tiempo de esta fase; el chequeo estructural actual queda
+  documentado como simulador, switchable sin cambiar el contrato `PdfaConformanceChecker`). Jobs de
+  resellado/reconciliación/vencimiento siguen siendo invocación directa, no cron real — se retoman
+  cuando exista infraestructura `api-worker`/BullMQ (F13).
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -365,8 +404,10 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F9 (Exportación y preservación): siguiente fase autónoma a ejecutar — jobs PDF/A y contenedor,
-  verificador offline (`packages/xml-engine/src/offline-verifier.ts` + CLI), resellado LTV.
-- Job de vencimiento (cron, evento VENCIDO) queda pendiente hasta que exista infraestructura de jobs —
-  ver "Pendiente" en F7.
+- F10 (Admin de integraciones — UI + API): siguiente fase autónoma a ejecutar — endpoints sección
+  6.5 completos + página `/admin/integraciones` (formulario, prueba de conexión, conmutación con
+  doble confirmación, historial, banner global de simulador).
+- Jobs de vencimiento/resellado/reconciliación siguen siendo invocación directa, no cron real —
+  ver "Pendiente" en F7/F9 (se retoman con `api-worker`/BullMQ en F13).
 - `GET /dte` y `GET /dte/:id/xml?version=n` quedan pendientes — ver "Pendiente" en F8.
+- Conformidad PDF/A real (veraPDF) queda pendiente — ver "Pendiente" en F9.

@@ -41,3 +41,6 @@ export * from './dte-pago.entity';
 export * from './dte-cancelacion.entity';
 export * from './dte-bloqueo.entity';
 export * from './consulta-verificacion.entity';
+export * from './exportacion.entity';
+export * from './resellado-ltv.entity';
+export * from './incidencia.entity';

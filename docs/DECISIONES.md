@@ -537,3 +537,50 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
 - **Alternativas descartadas:** crear una tabla de mapeo rol→nivel_consulta separada — se descarta
   porque duplicaría `cat_rol.nivel_acceso` sin necesidad; si algún rol futuro necesitara un nivel de
   verificación distinto a su nivel de acceso general, se puede agregar entonces sin romper nada ahora.
+
+## ADR-025 — F9: sello del manifiesto vía TSA (no XAdES) y PDF/A con conformidad simulada
+
+- **Fecha:** 2026-07-23
+- **Fase:** F9
+- **Contexto:** el contenedor de exportación necesita un "manifiesto sellado" (docs/PLAN.md sección
+  9) que pruebe que la lista de hashes de sus archivos no fue alterada después de generarse. El
+  manifiesto es JSON, no XML — envolver esto en XAdES habría exigido tratarlo como un documento XML
+  arbitrario, forzando la abstracción de `FirmaProviderPort` (pensada para el perfil pagaré-DTE)
+  fuera de su propósito. Por otro lado, `TsaProviderPort.sellarHash` (ya construido en F5 para
+  sellos de tiempo RFC 3161) es exactamente la primitiva correcta para "probar que este hash existía
+  y no cambió desde T" — el caso de uso de preservación a largo plazo (LTV) que F9 necesita.
+- **Decisión:**
+  - El manifiesto (`manifiesto.json`) se sella con un token TSA (RFC 3161) sobre su propio hash
+    SHA-256 (`manifiesto.tsr`, mismo mecanismo que resellado LTV). El verificador offline
+    (`packages/xml-engine/src/contenedor/index.ts`) extrae `messageImprint.hashedMessage` del token
+    y lo compara contra el hash actual del manifiesto — detecta tanto un archivo de datos alterado
+    (manifiesto no coincide con el archivo) como el propio manifiesto reemplazado (hash sellado ya
+    no coincide con el manifiesto). Se replicó un lector mínimo de token RFC 3161 dentro de
+    `xml-engine` (`extraerHashSellado`) en vez de importar `leerTokenTsa` de
+    `@psdte/crypto-providers`, porque ese paquete YA depende de `xml-engine` — importarlo de vuelta
+    crearía una dependencia circular entre paquetes del workspace.
+  - `packages/xml-engine/src/contenedor/` + `src/cli/verificar.ts` (compilado a
+    `dist/cli/verificar.js`, ya referenciado por el script raíz `pnpm verificar`) implementan el
+    contenedor/manifiesto/verificador offline — sin red ni BD, tal como pide la sección 9.
+  - **PDF/A real, conformidad simulada**: Puppeteer (Chromium ya preinstalado en este entorno) genera
+    el PDF base y Ghostscript (instalado vía `apt-get`, disponible en el sandbox) lo convierte a
+    PDF/A-2b real (`-dPDFA=2` + perfil ICC sRGB + `PDFA_def.ps`, ambos resueltos dinámicamente sin
+    hardcodear la versión de Ghostscript instalada). El chequeo de conformidad, sin embargo, es
+    **estructural** (`VerificadorPdfaEstructural`: cabecera `%PDF-`, `/OutputIntent`, metadata XMP
+    `pdfaid:part`/`pdfaid:conformance`, ausencia de `/Encrypt`) — NO es veraPDF, la herramienta que
+    el plan nombra explícitamente. veraPDF es un validador Java pesado (~cientos de MB con el modelo
+    de validación completo) cuya instalación no interactiva no se intentó en este entorno por
+    relación costo/beneficio dado el tiempo de la fase. Se documenta como simulador conmutable —
+    mismo patrón que `packages/crypto-providers` para firma/TSA/OCSP: el resultado ya incluye el
+    campo `herramienta` para poder distinguir "SIMULADOR_ESTRUCTURAL" de un futuro "VERAPDF" sin
+    cambiar el contrato (`PdfaConformanceChecker`).
+  - `ReselladoService`/`ReconciliacionService`: lógica de los jobs `resellado-ltv` y `reconciliacion`
+    (sección 9) implementada como servicios invocables directamente (endpoints
+    `POST /admin/jobs/resellado-ltv`, `GET /admin/jobs/reconciliacion`) en vez de jobs de cola/cron,
+    ya que esa infraestructura no existe todavía en el monorepo (mismo motivo que el cron de
+    vencimientos diferido en F7) — se retoma cuando exista `api-worker`/BullMQ (probablemente F13).
+- **Alternativas descartadas:**
+  - Envolver el manifiesto en XAdES reusando `FirmaProviderPort` — descartado por forzar una
+    abstracción XML-específica sobre contenido JSON.
+  - Instalar veraPDF ahora — descartado por costo/beneficio dado el tiempo restante de la fase;
+    queda como gap documentado y explícito, no oculto tras un chequeo que aparente ser el real.

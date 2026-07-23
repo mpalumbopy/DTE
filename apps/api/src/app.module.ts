@@ -20,6 +20,7 @@ import { IntegracionesModule } from './modules/integraciones/integraciones.modul
 import { EmisionModule } from './modules/emision/emision.module';
 import { EventosModule } from './modules/eventos/eventos.module';
 import { VerificacionModule } from './modules/verificacion/verificacion.module';
+import { ExportacionModule } from './modules/exportacion/exportacion.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CatalogoErrorService } from './common/filters/catalogo-error.service';
 import { CatalogoErrorFilter } from './common/filters/catalogo-error.filter';
@@ -59,6 +60,7 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     EmisionModule,
     EventosModule,
     VerificacionModule,
+    ExportacionModule,
   ],
   controllers: [AppController],
   providers: [
