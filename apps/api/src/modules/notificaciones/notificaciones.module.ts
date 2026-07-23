@@ -12,6 +12,6 @@ import { VencimientoNotificacionService } from './vencimiento-notificacion.servi
   imports: [TypeOrmModule.forFeature([Notificacion, Dte, DteTenencia, Persona])],
   controllers: [NotificacionesController],
   providers: [NotificacionesService, VencimientoNotificacionService],
-  exports: [NotificacionesService],
+  exports: [NotificacionesService, VencimientoNotificacionService],
 })
 export class NotificacionesModule {}

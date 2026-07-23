@@ -36,5 +36,6 @@ import { ReconciliacionService } from './reconciliacion.service';
   ],
   controllers: [ExportacionController],
   providers: [ExportacionService, ReselladoService, ReconciliacionService],
+  exports: [ReselladoService, ReconciliacionService],
 })
 export class ExportacionModule {}

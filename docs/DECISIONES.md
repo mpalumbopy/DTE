@@ -794,3 +794,61 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   - Un endpoint de detalle nuevo y paralelo a `GET /dte/:id/verificacion` — descartado por
     duplicar la lógica de niveles de acceso; extender la respuesta existente fue más simple y
     coherente con el modelo de trazabilidad ya establecido.
+
+## ADR-030 — F13: BullMQ + proceso `worker` dedicado para los jobs que F7/F9/F11 dejaron como invocación directa
+
+- **Fecha:** 2026-07-23
+- **Fase:** F13
+- **Contexto:** F7 (vencimientos), F9 (resellado LTV, reconciliación XML↔BD) y F11
+  (notificaciones) implementaron la lógica de negocio de sus respectivos jobs pero, a falta de
+  infraestructura de colas/cron, la dejaron documentada como "Pendiente: invocación directa, no
+  cron real" — cada servicio (`ReselladoService.reselladoVencidos`, `ReconciliacionService`,
+  `NotificacionesService.enviarPendientes`) queda correcto y probado, solo falta quién los llame
+  con una periodicidad real. F13 (sección 9 del plan, "colas/cron") es donde corresponde cerrar
+  esa deuda.
+- **Decisión:**
+  - `BullMQ` (`bullmq` + `@nestjs/bullmq`) sobre alternativas (`node-cron` desnudo, `agenda`):
+    persiste el estado del job en Redis (ya es una dependencia dura del sistema, no una nueva),
+    da reintentos/backoff/observabilidad de jobs (`getJobCounts`, UI de terceros tipo Bull Board
+    si se quisiera agregar después) y su API `upsertJobScheduler` cubre exactamente "repeatable
+    job con patrón cron, idempotente si el proceso reinicia" sin escribir ese manejo a mano.
+  - Conexión de BullMQ dedicada (no reutiliza `REDIS_CLIENT` de `RedisModule`): BullMQ exige
+    `maxRetriesPerRequest: null` porque usa comandos bloqueantes (`BRPOPLPUSH` etc.), mientras que
+    `RedisModule` fija `maxRetriesPerRequest: 2` para el resto de la app (rate-limiting,
+    idempotencia) — son necesidades de conexión incompatibles, no un descuido.
+  - Un proceso `worker` separado (`PROCESS_ROLE=worker`, `apps/api/src/main.worker.ts` +
+    `worker.module.ts`), NO los `@Processor` cargados dentro de `AppModule`/proceso `api`: si cada
+    réplica HTTP de la API también consumiera las colas, escalar la API horizontalmente
+    multiplicaría la ejecución de jobs que deben correr una sola vez (ej. resellado LTV diario).
+    `WorkerModule` importa `ConfigModule/LoggerModule/DatabaseModule/RedisModule/JobsModule` pero
+    deliberadamente NO `AppModule` — no tiene sentido cargar controllers/guards HTTP en un proceso
+    sin listener (`NestFactory.createApplicationContext`, no `.create()`).
+  - `JobsSchedulerService.onApplicationBootstrap` registra los 4 repetibles
+    (`resellado-ltv-diario` 03:00, `reconciliacion-horaria` cada hora, `notificaciones-cada-5-min`
+    cada 5 min, `vencimientos-proximos-diario` 06:00) SOLO si `PROCESS_ROLE === 'worker'` — mismo
+    motivo que el punto anterior: si el proceso `api` también programara los repetibles, cada
+    réplica de la API duplicaría el registro (aunque `upsertJobScheduler` es idempotente por
+    `schedulerId` fijo, programar desde el lugar equivocado sería confuso de auditar).
+  - Verificación realizada en el sandbox (sin Docker, con Redis nativo disponible): build +
+    typecheck limpios; arranque de `dist/main.worker.js` con `PROCESS_ROLE=worker` mostró el log
+    de los 4 repetibles programados; un job de prueba encolado manualmente
+    (`Queue('notificaciones').add(...)`) fue consumido por el worker y transicionó a `completed`
+    (confirmado con `getJobCounts()`/`job.getState()`), probando el flujo end-to-end real, no solo
+    que el código compila.
+  - La transición de estado "VENCIDO" (auto-marcar un DTE vencido cuando `fecha_vencimiento` pasó
+    y `saldo > 0`) sigue sin implementarse como evento de negocio: requeriría nuevas filas en
+    `cat_tipo_evento`/`cat_transicion` (no existen todavía) y probablemente soporte en
+    `xml-engine` para el nuevo tipo de evento — cambio de alcance mayor al de "agregar
+    scheduling", que F7/F9/F11 ya documentaron honestamente como pendiente. F13 agrega la cola
+    `vencimientos-proximos` (recordatorios, ya implementado en F11) pero no inventa la transición
+    de estado bajo presión de tiempo.
+- **Alternativas descartadas:**
+  - Cargar los `@Processor` dentro de `AppModule` (un solo proceso api+worker) — más simple para
+    desarrollo local, pero rompe el escalado horizontal de la API en producción (cada réplica
+    ejecutaría los cron jobs) y es lo que el propio plan (sección 9, "worker dedicado") pide
+    evitar.
+  - `node-cron` invocando los servicios directamente sin cola — más simple, pero sin persistencia
+    de estado de job (un reinicio del proceso a mitad de una reconciliación no deja rastro de qué
+    quedó a medias) ni reintentos; BullMQ ya estaba justificado por Redis como dependencia
+    existente, así que el costo marginal de adoptarlo es bajo frente al beneficio de
+    observabilidad/reintentos.

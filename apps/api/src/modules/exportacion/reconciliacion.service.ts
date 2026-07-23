@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { ErrorDominio } from '@psdte/shared';
 import { Parse, canonicalizarExclusivo, parsearDte, sha256Hex } from '@psdte/xml-engine';
 import { Dte } from '../../entities/dte.entity';
@@ -65,5 +65,18 @@ export class ReconciliacionService {
     }
 
     return { consistente: discrepancias.length === 0, discrepancias };
+  }
+
+  /** Job `reconciliacion` (sección 9, cron horario): reconcilia todos los DTE que todavía admiten
+   * eventos (I8: discrepancia XML↔BD solo importa mientras el título siga vivo). */
+  async reconciliarTodos(): Promise<{ revisados: number; conDiscrepancia: number }> {
+    const ESTADO_CANCELADO = 8;
+    const dtes = await this.dteRepo.find({ where: { estadoActual: Not(ESTADO_CANCELADO) }, select: ['id'] });
+    let conDiscrepancia = 0;
+    for (const { id } of dtes) {
+      const resultado = await this.reconciliarDte(id);
+      if (!resultado.consistente) conDiscrepancia += 1;
+    }
+    return { revisados: dtes.length, conDiscrepancia };
   }
 }
