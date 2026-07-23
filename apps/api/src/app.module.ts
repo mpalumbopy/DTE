@@ -29,6 +29,7 @@ import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { CatalogoErrorService } from './common/filters/catalogo-error.service';
 import { CatalogoErrorFilter } from './common/filters/catalogo-error.filter';
 import { AuditoriaInterceptor } from './common/interceptors/auditoria.interceptor';
+import { IdempotenciaInterceptor } from './common/interceptors/idempotencia.interceptor';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { MfaGuard } from './common/guards/mfa.guard';
@@ -78,6 +79,7 @@ import { decodificarPem, EnvConfig } from './config/config.schema';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: MfaGuard },
+    { provide: APP_INTERCEPTOR, useClass: IdempotenciaInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditoriaInterceptor },
   ],
 })

@@ -974,3 +974,49 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
     (breaking changes de API, no solo de seguridad) es exactamente el tipo de "arreglo" que rompe
     en producción de forma silenciosa; el override solo es seguro para dependencias TRANSITIVAS
     donde nosotros no llamamos directamente a su API.
+
+## ADR-033 — F14: invariante I10 (idempotencia) sin implementación hasta ahora; `IdempotenciaInterceptor` + test consolidado de I1-I10
+
+- **Fecha:** 2026-07-23
+- **Fase:** F14
+- **Contexto:** al preparar el test dedicado por invariante que pide el DoD de F14, una búsqueda
+  de "Idempotency-Key" en todo `apps/api/src` no encontró NINGÚN resultado — el invariante I10
+  ("operaciones nunca a medias... idempotencia por Idempotency-Key", tabla no-negociable de
+  CLAUDE.md desde F0) nunca se implementó en ninguna fase anterior. A diferencia de otros gaps
+  documentados este proyecto (jobs de sección 9 sin cola real, PDF/A sin veraPDF), este es uno de
+  los 10 invariantes explícitamente marcados "NO NEGOCIABLES — nunca degradar para pasar un test"
+  — no es un nice-to-have que se pueda dejar como excepción documentada sin más; F14
+  ("Endurecimiento y cierre") es la fase donde corresponde cerrarlo.
+- **Decisión:**
+  - `IdempotenciaInterceptor` (`apps/api/src/common/interceptors/idempotencia.interceptor.ts`),
+    registrado como `APP_INTERCEPTOR` global, ANTES de `AuditoriaInterceptor` en el orden de
+    providers (para que una respuesta reproducida por caché no genere una entrada nueva de
+    auditoría — no fue una mutación real). Opt-in: solo actúa si el cliente envía el header
+    `Idempotency-Key` en una mutación (POST/PUT/PATCH/DELETE); sin el header, comportamiento
+    idéntico al actual.
+  - Clave de Redis `idem:{usuarioId}:{método}:{ruta}:{claveDelCliente}` — con `SET ... NX` atómico
+    para reclamar el turno de ejecutar. Una segunda petición con la MISMA clave mientras la primera
+    sigue en curso recibe 409 (evita ejecutar el handler dos veces en paralelo); una vez completada
+    la primera, la segunda recibe la respuesta cacheada (TTL 24h) con el header
+    `Idempotent-Replay: true` para que el cliente distinga una respuesta reproducida de una fresca.
+  - Simplificación deliberada: la respuesta reproducida siempre llega con status 200, no con el
+    status original de la primera ejecución (p. ej. 201 de un `@HttpCode`) — NestJS solo aplica el
+    status real a la respuesta HTTP DESPUÉS de que la cadena de interceptors completa, así que
+    leerlo dentro del interceptor sería leer un valor todavía no asignado; replicar el status real
+    exigiría leer metadata interna no pública de Nest (`HTTP_CODE_METADATA`), considerado más
+    frágil que esta simplificación documentada.
+  - `apps/api/test/invariantes/invariantes.e2e-spec.ts` (nuevo): UN test dedicado por invariante
+    I1-I10, con el número en el nombre del `it` para que sea grepeable. I1/I9 incluyen un barrido
+    estático (lee `apps/api/src/**/*.ts` y falla si aparece un `DELETE FROM psdte.dte` o un campo
+    de clave privada de firmante) además de la verificación en runtime — varias fases anteriores
+    (F1, F7) ya tenían cobertura dispersa de I2/I3/I4/I5/I6; este archivo no la reemplaza, es el
+    punto único de verificación consolidada al cierre del proyecto que pide el DoD de F14.
+- **Alternativas descartadas:**
+  - Aplicar el interceptor solo a los endpoints de eventos de DTE (endoso/pago/bloqueo/
+    cancelación) en vez de global — descartado: el checklist de seguridad (sección 10 del plan)
+    pide la cabecera "en mutaciones" sin acotarlo a un módulo, y el costo de aplicarlo globalmente
+    es cero cuando el cliente no envía el header.
+  - Replicar el status code original leyendo `HTTP_CODE_METADATA` (constante interna de
+    `@nestjs/common`, no exportada del entrypoint público) — descartado por fragilidad: es un
+    string interno (`'__httpCode__'`) que podría cambiar entre versiones de Nest sin aviso en el
+    changelog público.
