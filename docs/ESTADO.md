@@ -484,6 +484,62 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
   claves/valores para JSON crudo (heredado de F10) y dashboard/bandeja/wizards de emisión siguen
   siendo explícitamente F12.
 
+## F12 — Frontend completo
+
+- **Fecha:** 2026-07-23
+- **Estado:** ✅ completa
+- **DoD ejecutado (docs/PLAN.md sección 13):** suite Playwright completa en verde (22/22) ·
+  `pnpm --filter web build` sin warnings de tipo · Lighthouse a11y: **100/100** en
+  `/verificar/[codigo]` y **100/100** en `/login` (DoD pide ≥90; corrido ad hoc con
+  `npx lighthouse` contra el build de producción, sin agregarlo como dependencia permanente — el
+  plan marca este script como CI opcional).
+- **Hecho:**
+  - Backend: `GET /dte` (bandeja paginada con filtros estado/fechas/texto, visibilidad por rol
+    operativo — no por `nivel_acceso`, ver ADR-029), `GET /dte/:id/xml?version=n`,
+    `GET /dte/kpis` (dashboard). `GET /dte/:id/verificacion` (F8) extendido con `partes` y
+    `bloqueoActivoId`. `GET /personas` abierto a TENEDOR/DEUDOR/AUTORIDAD solo para búsqueda por
+    documento (nuevo `ERR-DTE-403` si se omite). Nuevo `POST /dev/firmador` (firma manual contra
+    el simulador, gateado por `ALLOW_SIMULATOR` + `ADMIN_PSDTE`).
+  - Frontend — todas las páginas de la sección 8 que faltaban: layout privado con sidebar de
+    navegación por rol (colapsable en móvil) + dashboard con KPIs reales; `(publico)/verificar/
+    [codigo]` (SSR, QR, re-verificación en vivo, sin datos personales); bandeja de pagarés
+    (TanStack Table, filtros servidor, paginación); detalle de DTE (cabecera, partes, timeline de
+    eventos con chips de firma verde/rojo, acciones calculadas desde CAT-DTE-03 — nunca
+    hardcodeadas); wizards de endoso (búsqueda de endosatario por documento + confirmación),
+    pago, bloqueo, cancelación y exportación (contenedor/PDF-A descargados como blob autenticado,
+    no un `<a href>` con token en query); wizard de emisión de 5 pasos; admin/usuarios (alta +
+    edición de roles), admin/catálogos (navegador genérico de CAT-DTE-01..10), admin/parámetros
+    (edición de valores JSON); dev/firmador.
+  - Utilidades `lib/formato.ts` (monto/fecha es-PY vía `Intl`, con el código de moneda del propio
+    DTE, nunca asumiendo PYG) y `lib/acciones-dte.ts` (deriva los botones de acción de la bandeja/
+    detalle desde la matriz de transiciones — solo los 4 tipos de evento con flujo implementado
+    en F7 tienen botón; el resto de CAT-DTE-03 son transiciones válidas en el catálogo sin
+    endpoint todavía).
+  - Infraestructura de Playwright reescrita (bloqueante, encontrado al construir los wizards):
+    un `globalSetup` hace el login real de los 5 roles demo UNA sola vez antes de toda la suite
+    y persiste los tokens en un archivo (gitignored); los specs inyectan la sesión en
+    `sessionStorage` en vez de repetir el formulario de login. Se había asumido que un caché en
+    memoria por request sobrevivía entre archivos de specs — no es así (cada archivo carga en su
+    propio contexto de módulos) y el límite de 5 intentos/60s de `POST /auth/login` se agotaba
+    apenas la suite creció. login/MFA por UI se prueba una sola vez, con respuestas mockeadas, en
+    `auth-ui.spec.ts` (la lógica de autenticación real ya tiene su e2e dedicado en la API).
+  - Responsive verificado con Playwright en viewport móvil (375×667): dashboard, bandeja, login,
+    verificar público y wizard de emisión sin scroll horizontal.
+  - e2e nuevos: `test/dte/dte.e2e-spec.ts` (4 casos), `test/dev/dev.e2e-spec.ts` (3 casos),
+    ampliación de `test/catalogos-personas` (1 caso). Playwright:
+    `emitir.spec.ts`, `wizards.spec.ts`, `admin-pages.spec.ts`, `responsive.spec.ts`,
+    `auth-ui.spec.ts` reescrito, más los smoke de bandeja/detalle/verificar ya existentes.
+    14/14 suites e2e de API (63 casos) + 22/22 Playwright en verde, estable en corridas repetidas.
+- **Decisiones registradas:** ADR-029 (visibilidad de bandeja por rol operativo en vez de
+  `nivel_acceso`; endpoints nuevos de F8 pendiente; wizard de emisión y firmador de desarrollo;
+  hallazgo y corrección de Lighthouse; infraestructura de Playwright).
+- **Pendiente:** conformidad PDF/A real (veraPDF, F9), jobs de vencimiento/resellado/
+  reconciliación/notificaciones como invocación directa en vez de cron real (F13), MailHog real
+  vía Docker (F11) — ninguno de estos es responsabilidad de F12. Editor visual de tabla clave/
+  valor para JSON crudo en `admin/integraciones` (heredado de F10) sigue pendiente de una UI más
+  rica. Un editor visual similar para `admin/parametros`/`admin/catalogos` (hoy JSON crudo /
+  tabla genérica de solo lectura) queda como posible pulido futuro, no bloqueante del DoD.
+
 ## Insumos de referencia
 
 - `db/modelo_datos_psdte.sql`: **recibido** (2026-07-22), usado en F1.
@@ -495,13 +551,15 @@ Bitácora de fases. Se actualiza al cierre de cada fase (ver `docs/PLAN.md` secc
 
 ## Próximos pasos
 
-- F12 (Frontend completo): siguiente fase autónoma a ejecutar — todas las páginas de la sección 8
-  (dashboard, bandeja de DTE, wizard de emisión, timeline, wizards de endoso/pago/bloqueo/
-  exportación), i18n es-PY, responsive, navegación global (las páginas de F10/F11 hoy se acceden
-  por URL directa, sin sidebar), Lighthouse a11y ≥ 90 en `/verificar` y `/login`.
+- F13 (Kubernetes + observabilidad + runbook): siguiente fase autónoma a ejecutar — Dockerfiles
+  multi-stage (api, api-worker con chromium+ghostscript, web standalone), manifests, migrate-job,
+  overlays dev/prod, `docs/RUNBOOK.md`. Esta fase es también donde se retoma la infraestructura de
+  cola/cron real (`api-worker`/BullMQ) que F7/F9/F11 dejaron como invocación directa.
 - Jobs de vencimiento/resellado/reconciliación/notificaciones siguen siendo invocación directa, no
   cron real — ver "Pendiente" en F7/F9/F11 (se retoman con `api-worker`/BullMQ en F13).
-- `GET /dte` y `GET /dte/:id/xml?version=n` quedan pendientes — ver "Pendiente" en F8.
 - Conformidad PDF/A real (veraPDF) queda pendiente — ver "Pendiente" en F9.
 - MailHog real (Docker) no se pudo levantar en este sandbox — ver "Pendiente" en F11 (`maildev`
   como sustituto de prueba, sin impacto en el código de producción).
+- Editor visual de tabla clave/valor para JSON crudo en `admin/integraciones` (F10) y posible
+  editor visual similar para `admin/parametros`/`admin/catalogos` (F12) — pulido de UI, no
+  bloqueante de ningún DoD.

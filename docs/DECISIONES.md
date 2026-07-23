@@ -727,3 +727,70 @@ Cada entrada: fecha, fase, contexto, decisión, alternativas descartadas.
   - Exponer un endpoint de creación manual de incidencias — descartado, fuera del alcance que pide
     el plan (las incidencias son siempre subproducto de un job, nunca una acción manual de un
     operador).
+
+## ADR-029 — F12: visibilidad de la bandeja por rol operativo (no por `nivel_acceso`); `GET /dte`, `GET /dte/:id/xml` y `partes` agregados a la verificación detallada
+
+- **Fecha:** 2026-07-23
+- **Fase:** F12
+- **Contexto:** F8 dejó explícitamente pendientes `GET /dte` (bandeja paginada) y
+  `GET /dte/:id/xml?version=n` "para cuando el frontend los necesitara" (ver docs/ESTADO.md, F8).
+  Al construirlos, la primera versión reutilizó `cat_rol.nivel_acceso` (el modelo de niveles de
+  CAT-DTE-04 que F8 ya usa para `GET /dte/:id/verificacion`) para decidir qué DTE ve cada usuario
+  en la bandeja — y resultó ser el modelo equivocado para ese caso: `ADMIN_PSDTE` tiene
+  `nivel_acceso=4` pero, según su propia descripción en `cat_rol` ("Gestión de usuarios,
+  parámetros e integraciones; no opera DTE"), y `OPERADOR_EMISION` tiene `nivel_acceso=2` (el
+  mismo nivel que TENEDOR/DEUDOR) pese a que sí necesita ver TODOS los DTE que emite, no solo los
+  propios. `nivel_acceso` fue diseñado para "¿cuánto detalle puede ver esta consulta pública/
+  autenticada de UN DTE puntual?", no para "¿qué universo de DTE debería listar la bandeja de este
+  usuario?" — son preguntas distintas que el catálogo conflacionaba solo porque compartían un
+  número.
+- **Decisión:**
+  - Nueva regla explícita por rol (no por nivel numérico) en `DteService`:
+    `ADMIN_PSDTE, OPERADOR_EMISION, AUTORIDAD, AUDITOR` tienen visibilidad completa de la bandeja
+    y del XML de cualquier DTE; `TENEDOR, DEUDOR` (roles de "parte") solo ven los DTE donde
+    participan (vía `VerificacionService.dteIdsRelacionados`, un método nuevo que generaliza
+    `esRelacionado` para listados en vez de repetirlo por fila). Nuevo código de catálogo
+    `ERR-DTE-403` ("No tiene acceso a este DTE") para el caso de XML denegado.
+  - `GET /dte/:id/verificacion` (F8) se extendió con `partes` (rol + nombre + condición de
+    firmante) y `bloqueoActivoId` en vez de crear un endpoint de detalle paralelo — evita duplicar
+    la lógica de niveles de acceso ya validada en F8, y de paso cada vista de detalle en la UI
+    privada queda registrada como una `consulta_verificacion` (consistente con el espíritu de
+    trazabilidad de CAT-DTE-04: toda exposición de detalle de un DTE es, por definición, una
+    consulta).
+  - `GET /personas` se abrió a `TENEDOR/DEUDOR/AUTORIDAD` pero SOLO para búsqueda por documento
+    (`?documento=`) — el wizard de endoso necesita ubicar al endosatario por su número de
+    documento. El listado completo sin filtro (que expone email/teléfono de todo el padrón) sigue
+    restringido a `ADMIN_PSDTE/OPERADOR_EMISION`; omitir el filtro con un rol restringido devuelve
+    `ERR-DTE-403` en vez de la lista completa — se detectó este riesgo de sobre-exposición al
+    escribir el endpoint, antes de que llegara a probarse con datos reales.
+  - Wizard de emisión (5 pasos: datos generales → partes → condiciones → revisión → firmas): el
+    paso "firmas" muestra el resultado de la firma como YA COMPLETADO en vez de un sondeo
+    asincrónico por firmante, porque en modo SIMULADOR `solicitarFirma` es sincrónico (F6) — no
+    existe todavía una ronda de firmas real que sondear. El paso de "preview XML/PDF" que describe
+    la sección 8 se reemplazó por una pantalla de revisión de datos capturados (sin volcar el XML
+    crudo): no existe un endpoint que exponga el XML parcial antes de confirmar, y agregarlo solo
+    para una vista previa no aportaba valor sobre repetir el resumen ya capturado en el wizard.
+  - `dev/firmador` (sección 8, "solo ALLOW_SIMULATOR"): nuevo `POST /dev/firmador` — envuelve un
+    texto libre en un XML mínimo, lo canonicaliza y lo firma vía
+    `ProviderFactoryService.obtenerProveedorFirma()` (la MISMA fábrica que usa producción, nunca un
+    mock aparte), devolviendo el XAdES resultante para inspección manual. Rechaza con 403 si
+    `ALLOW_SIMULATOR=false` — no tendría sentido en ese caso, no hay simulador que invocar.
+  - Infraestructura de Lighthouse: se corrió `npx lighthouse` (ad hoc, sin agregarlo como
+    dependencia permanente — el plan marca este script como "CI opcional") contra `apps/web`
+    compilado en modo producción, apuntando al Chromium preinstalado del sandbox. Encontró un
+    único hallazgo real (`text-gray-400` sobre fondo blanco, contraste 2.53:1 en el pie de
+    `/verificar` y en una nota de `/admin/integraciones`) — corregido a `text-gray-600` (contraste
+    ≥7:1) en ambos lugares. Resultado final: 100/100 en accesibilidad en `/verificar/[codigo]` y
+    en `/login` (el DoD pide ≥90). Registrado en docs/ESTADO.md.
+  - Responsive: verificado con Playwright en viewport móvil (375×667) que dashboard, bandeja,
+    login, verificar público y el wizard de emisión no generan scroll horizontal; el layout
+    privado ya tenía un menú lateral colapsable para pantallas angostas desde que se construyó
+    (F12, tarea de layout).
+- **Alternativas descartadas:**
+  - Mantener `nivel_acceso` para la bandeja y "arreglar" el catálogo subiendo el nivel de
+    OPERADOR_EMISION — descartado: cambiaría el significado de `nivel_acceso` para el modelo de
+    verificación de F8 (donde si tiene sentido que OPERADOR_EMISION sea "interviniente", no
+    "autoridad"), rompiendo esa fase para resolver un problema de otra.
+  - Un endpoint de detalle nuevo y paralelo a `GET /dte/:id/verificacion` — descartado por
+    duplicar la lógica de niveles de acceso; extender la respuesta existente fue más simple y
+    coherente con el modelo de trazabilidad ya establecido.

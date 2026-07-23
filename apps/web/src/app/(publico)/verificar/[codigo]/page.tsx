@@ -52,7 +52,7 @@ export default async function VerificarPage({ params }: { params: { codigo: stri
         </div>
       )}
 
-      <p className="mt-8 text-xs text-gray-400">
+      <p className="mt-8 text-xs text-gray-600">
         Esta consulta pública no expone datos personales de las partes del pagaré (Ley N.° 6822/2021, art. 5.2).
       </p>
     </main>

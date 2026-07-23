@@ -203,7 +203,7 @@ export default function IntegracionesPage() {
             </div>
             <p className="mt-1 text-xs text-gray-500">{integracion.nombre}</p>
             {integracion.ultimoTest && (
-              <p className="mt-1 text-xs text-gray-400">
+              <p className="mt-1 text-xs text-gray-600">
                 Último test: {integracion.ultimoTest.ok ? 'OK' : 'FALLÓ'} ({integracion.ultimoTest.latenciaMs} ms)
               </p>
             )}
