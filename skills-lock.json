@@ -37,6 +37,12 @@
       "skillPath": "skills/remote-browser/SKILL.md",
       "computedHash": "8cf89823c7cafe4d52e0c5ed4cce97ff6956d6367a19341b0c6f1c1ef025932e"
     },
+    "valyu-best-practices": {
+      "source": "valyuai/skills",
+      "sourceType": "github",
+      "skillPath": "valyu-search/valyu-best-practices/SKILL.md",
+      "computedHash": "40d76de811b2082566424975ff18af7990b6000b144d4b6187486783b517099b"
+    },
     "x402": {
       "source": "browser-use/browser-use",
       "sourceType": "github",
