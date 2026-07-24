@@ -7,11 +7,41 @@
       "skillPath": "skills/browser-use/SKILL.md",
       "computedHash": "9b1d8ce117efe0626a344eaf1db1a86a4b048deb2bc6d55f6600d0a457884ee0"
     },
+    "cloud": {
+      "source": "browser-use/browser-use",
+      "sourceType": "github",
+      "skillPath": "skills/cloud/SKILL.md",
+      "computedHash": "b8d447a793468bb3d832239cf99872b6d21538f388ecafaedf9ea1aff78a9aca"
+    },
     "frontend-design": {
       "source": "anthropics/claude-code",
       "sourceType": "github",
       "skillPath": "plugins/frontend-design/skills/frontend-design/SKILL.md",
       "computedHash": "3e0be122a3db8206b6d0d6b07cca898b5c75fb9b7b2101abe143fb2851734d2e"
+    },
+    "open-source": {
+      "source": "browser-use/browser-use",
+      "sourceType": "github",
+      "skillPath": "skills/open-source/SKILL.md",
+      "computedHash": "633e852b42541167618777abe3e680499131ee59b13b46125e6ced74e04dba99"
+    },
+    "qa": {
+      "source": "browser-use/browser-use",
+      "sourceType": "github",
+      "skillPath": "skills/qa/SKILL.md",
+      "computedHash": "db0ede85f44095730008eb6dec9e9c073a8a7de73f66fdd6cb9d7075a9be6fec"
+    },
+    "remote-browser": {
+      "source": "browser-use/browser-use",
+      "sourceType": "github",
+      "skillPath": "skills/remote-browser/SKILL.md",
+      "computedHash": "8cf89823c7cafe4d52e0c5ed4cce97ff6956d6367a19341b0c6f1c1ef025932e"
+    },
+    "x402": {
+      "source": "browser-use/browser-use",
+      "sourceType": "github",
+      "skillPath": "skills/x402/SKILL.md",
+      "computedHash": "c3e54f71161ba230d6fbeee1a633136fd7b6791499f3c281dc9917479f6d315a"
     }
   }
 }
